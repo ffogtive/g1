@@ -2,10 +2,10 @@
 /*
  * 모아쿵! 3D 실제 조작 검증 (Playwright + Chromium, WebGL 소프트웨어 렌더링)
  *
- * 가설: 실제 화면의 수거 범위(BRUSH_R=4.4)와 실제 마우스/터치 입력만으로
+ * 가설: 실제 화면의 수거 범위(BRUSH_R=3.6)와 실제 마우스/터치 입력만으로
  *       ① 수거·놓기·잡아 옮기기·톡 흩기 ② 개수 맞춤 ③ 낙하마다 round(n/3) 감소와 HUD 일치
  *       ④ 필요한 만큼만 = ★★★ ⑤ 여러 층에 전부 쏟기 = 실패 ⑥ 취소·재시작 무차감
- *       ⑦ Meshy 모델 케이크 레벨 동작 ⑧ 진행 저장 이 모두 재현된다.
+ *       ⑦ Meshy 모델 케이크 레벨 동작 ⑧ 진행 저장 ⑨ 낙하 위치(과녁)에 맞는 국소 파괴(판정은 위치 무관) 가 모두 재현된다.
  *
  * 원칙: 상태를 바꾸는 API 없음. window.moakung 은 읽기 전용(스냅샷, 화면좌표가 조준 영역인지 probe).
  *       봇은 화면에 보이는 정보(재료 위치, 개수 말풍선, 조준 카드)만 보고 포인터를 움직인다.
@@ -223,6 +223,42 @@ async function playAllIn(bot, coat) {
 }
 
 const SCENARIOS = {
+  /** 낙하 위치: 같은 덩어리로 왼쪽/오른쪽 끝을 겨누면 판정은 같고, 떨어져 나가는 조각은 맞은 쪽에 몰린다 */
+  async position(bot) {
+    console.log('\n■ 낙하 위치 = 부서지는 곳 (레벨 1, 4개로 왼쪽 / 오른쪽)');
+    const res = {};
+    for (const side of ['left', 'right']) {
+      let s = await bot.openLevel(0);
+      bot.pos = null;
+      await bot.setLock(4);
+      s = await bot.sweep({ until: sn => sn.held >= 4 });
+      // 화면에서 케이크 왼쪽(오른쪽) 끝: 조준 영역 안에서 가장 바깥 점
+      const dir = side === 'left' ? -1 : 1;
+      let best = null;
+      for (let k = 0; k <= 20; k++) {
+        const x = s.cakeAim.sx + dir * k * 8, y = s.cakeAim.sy - 20;
+        if (!(await bot.probe(x, y)).aim) break;
+        best = { x, y };
+      }
+      await bot.moveTo(best.x, best.y);
+      await bot.wait(300);
+      const aim = await bot.snap();
+      await bot.release();
+      const after = await bot.idle();
+      const h = after.history[after.history.length - 1];
+      const C = after.cakeCenter, hit = h.hit;
+      res[side] = { aim, h, hpAfter: after.layers[0].hp, C };
+      console.log(`   · ${side}: 과녁 (${aim.target && aim.target.x}, ${aim.target && aim.target.z}) → ${h.kind} 힘 ${h.power}, 떼어낸 조각 ${hit.chunks}개 중심 (${hit.cx}, ${hit.cz}) · 케이크 중심 (${C.x}, ${C.z})`);
+      check(`${side}: 과녁 표시 = 실제 맞은 곳`, aim.target && Math.hypot(aim.target.x - hit.x, aim.target.z - hit.z) < 0.4);
+      check(`${side}: 떨어져 나간 조각이 맞은 쪽에 몰림`, hit.chunks > 0 && (hit.cx - C.x) * (hit.x - C.x) + (hit.cz - C.z) * (hit.z - C.z) > 0);
+      check(`${side}: 미리보기 판정 = 실제 (위치 무관)`, h.power === aim.preview.power && h.broke === aim.preview.breaks);
+    }
+    const L = res.left, Rr = res.right, C = L.C;
+    check('왼쪽과 오른쪽은 반대쪽이 부서짐', (L.h.hit.cx - C.x) * (Rr.h.hit.cx - C.x) + (L.h.hit.cz - C.z) * (Rr.h.hit.cz - C.z) < 0,
+      `왼쪽 (${L.h.hit.cx}, ${L.h.hit.cz}) / 오른쪽 (${Rr.h.hit.cx}, ${Rr.h.hit.cz})`);
+    if (L.h.power === Rr.h.power) check('같은 힘이면 위치가 달라도 남은 체력 같음', L.hpAfter === Rr.hpAfter, `${L.hpAfter} / ${Rr.hpAfter}`);
+    await bot.shot('e2e3d-position');
+  },
   async gather(bot) {
     console.log('\n■ 수거·놓기·잡아 옮기기·톡 흩기 (레벨 1)');
     let s = await bot.openLevel(0);

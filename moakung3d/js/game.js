@@ -3,6 +3,7 @@
  *
  * 가설: 2D에서 검증한 조작(쓸어 담기 · 놓기 · 잡아 옮기기 · 톡 흩기)에 "개수 맞춤"을 더하면
  *       물리 3D에서도 정밀 조작 없이 원하는 만큼 정확히 모을 수 있다.
+ *       낙하 위치(과녁)는 손가락이 가리키는 케이크 윗면 — 판정 수치는 위치와 무관, 부서지는 모양·튀는 방향만 위치를 따른다.
  *  - 낙하 횟수는 케이크 위에서 손을 뗀 순간에만 준다.
  *  - 잃는 개수는 충돌 순간 rules.pickLost 로 확정, HUD 재료 수는 그 재료가 쟁반 테두리를 넘을 때 줄어든다.
  */
@@ -14,10 +15,12 @@
   var W = window.MKWorld.create(canvas);
   var V3 = THREE.Vector3;
 
-  var BRUSH_R = 4.4;       // 수거 범위 (넉넉하게)
-  var PICK_Y = 1.7;        // 이 높이보다 낮게 놓인 재료만 쓸어 담는다
+  var BRUSH_R = 3.6;       // 수거 범위 (넉넉하게)
+  var PICK_Y = 1.9;        // 이 높이보다 낮게 놓인 재료만 쓸어 담는다
   var TAP_PX = 12;         // 이보다 덜 움직이면 '톡'
-  var DROP_LIFT = 9;       // 케이크 위로 자동으로 올리는 높이
+  var DROP_LIFT = 11;      // 과녁 위로 자동으로 올리는 높이
+  var HOVER = 2.2;         // 조준 중 덩어리가 과녁 위에 떠 있는 높이
+  var SLAM_V0 = 22, SLAM_G = 150; // 내리꽂는 초속·가속 (속도감)
 
   /* ---------------- 저장 ---------------- */
   var SAVE_KEY = 'moakung3d.v1';
@@ -34,7 +37,7 @@
   S.setEnabled(save.sound);
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
-  function ease(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+  function easeOutBack(t) { var c = 1.9; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); }
   function dXZ(a, bx, bz) { var dx = a.x - bx, dz = a.z - bz; return Math.sqrt(dx * dx + dz * dz); }
 
   /* ---------------- 덩어리 안 자리 (공 모양으로 쌓임) ---------------- */
@@ -44,7 +47,7 @@
     var v;
     if (i === 0) v = new V3(0, 0, 0);
     else {
-      var r = 0.6 * Math.cbrt(i + 1);
+      var r = 0.92 * Math.cbrt(i + 1);
       var y = 1 - 2 * ((i * 0.618034) % 1);
       var rad = Math.sqrt(Math.max(0, 1 - y * y));
       var th = i * 2.399963;
@@ -53,7 +56,7 @@
     slotCache[i] = v;
     return v;
   }
-  function clumpR(n) { return 0.6 * Math.cbrt(Math.max(1, n)) + 0.55; }
+  function clumpR(n) { return 0.92 * Math.cbrt(Math.max(1, n)) + 0.75; }
 
   /* ---------------- 3D 모델 (Meshy) ---------------- */
   var MODELS = {};
@@ -104,7 +107,7 @@
     }
     return { x: 0, z: W.TD / 2 - 3 };
   }
-  function cakeR() { return W.cake ? W.cake.style.r * W.cake.scale : 7; }
+  function cakeR() { return W.cake ? W.cake.style.r : 7; }
 
   function layoutItems(lv, rand) {
     var heavy = [], light = [];
@@ -119,7 +122,7 @@
     while (centers.length < nC && tries++ < 5000) {
       var x = (rand() - 0.5) * (W.TW - 6), z = (rand() - 0.5) * (W.TD - 6);
       if (!free(x, z, 4.5)) continue;
-      if (centers.some(function (c) { return Math.hypot(c.x - x, c.z - z) < 6.2; })) continue;
+      if (centers.some(function (c) { return Math.hypot(c.x - x, c.z - z) < 5.4; })) continue;
       centers.push({ x: x, z: z });
     }
     var piles = Math.min(lv.piles || 0, centers.length);
@@ -136,12 +139,12 @@
         var a = rand() * Math.PI * 2, d = Math.sqrt(rand()) * (3 + t * 0.02);
         var px = p.c.x + Math.cos(a) * d, pz = p.c.z + Math.sin(a) * d;
         if (!free(px, pz)) continue;
-        if (items.some(function (o) { return Math.hypot(o.x - px, o.z - pz) < 1.6; })) continue;
+        if (items.some(function (o) { return Math.hypot(o.x - px, o.z - pz) < 2.0; })) continue;
         pos = { x: px, z: pz };
       }
       for (var f = 0; f < 5000 && !pos; f++) {
         var fx = (rand() - 0.5) * (W.TW - 3), fz = (rand() - 0.5) * (W.TD - 3);
-        if (free(fx, fz) && !items.some(function (o) { return Math.hypot(o.x - fx, o.z - fz) < 1.25; })) pos = { x: fx, z: fz };
+        if (free(fx, fz) && !items.some(function (o) { return Math.hypot(o.x - fx, o.z - fz) < 1.7; })) pos = { x: fx, z: fz };
       }
       items.push({ id: id, mat: p.mat, v: Math.floor(rand() * 4), x: pos.x, z: pos.z, rot: rand() * 6.28, state: 'floor', q0: new THREE.Quaternion().setFromEuler(new THREE.Euler(rand() * 6, rand() * 6, rand() * 6)) });
     });
@@ -157,6 +160,7 @@
     G.clumps.forEach(function (c) { if (c.body) W.world.removeBody(c.body); });
     if (G.drop && G.drop.body) W.world.removeBody(G.drop.body);
     W.clearFx();
+    W.setReticle(null);
     W.disposeCake();
     $('fx-layer').innerHTML = '';
     $('badges').innerHTML = '';
@@ -225,11 +229,11 @@
       var c = new V3(cl.body.position.x, cl.body.position.y, cl.body.position.z);
       cl.items.forEach(function (it) { it.state = 'held'; });
       G.carried = true;
-      G.drag = { id: e.pointerId, mode: 'carry', cx0: e.clientX, cy0: e.clientY, cx: e.clientX, cy: e.clientY, moved: 0, fp: fp, last: fp.clone(), held: cl.items, pos: c, off: new V3(c.x - fp.x, 0, c.z - fp.z), aim: false, spin: 0 };
+      G.drag = { id: e.pointerId, mode: 'carry', cx0: e.clientX, cy0: e.clientY, cx: e.clientX, cy: e.clientY, moved: 0, fp: fp, last: fp.clone(), held: cl.items, pos: c, off: new V3(c.x - fp.x, 0, c.z - fp.z), aim: false, target: null, spin: 0 };
       S.gather('click');
       return;
     }
-    G.drag = { id: e.pointerId, mode: 'sweep', cx0: e.clientX, cy0: e.clientY, cx: e.clientX, cy: e.clientY, moved: 0, fp: fp, last: fp.clone(), held: [], pos: new V3(fp.x, 1.4, fp.z), off: new V3(), aim: false, spin: 0 };
+    G.drag = { id: e.pointerId, mode: 'sweep', cx0: e.clientX, cy0: e.clientY, cx: e.clientX, cy: e.clientY, moved: 0, fp: fp, last: fp.clone(), held: [], pos: new V3(fp.x, 1.4, fp.z), off: new V3(), aim: false, target: null, spin: 0 };
     sweep(fp, fp);
   });
   canvas.addEventListener('pointermove', function (e) {
@@ -242,6 +246,7 @@
     var fp = W.floorPoint(e.clientX, e.clientY, 0.5);
     if (!fp) return;
     d.aim = aimAt(e.clientX, e.clientY);
+    d.target = d.aim ? W.cakeTargetAt(e.clientX, e.clientY) : null; // 손가락이 가리키는 케이크 윗면 = 과녁
     if (d.mode === 'sweep' && !d.aim) sweep(d.last, fp);
     d.last = fp.clone();
     d.fp = fp;
@@ -250,6 +255,7 @@
   canvas.addEventListener('pointerup', function (e) {
     if (!G || !G.drag || e.pointerId !== G.drag.id) return;
     G.drag.aim = aimAt(e.clientX, e.clientY);
+    if (G.drag.aim) G.drag.target = W.cakeTargetAt(e.clientX, e.clientY);
     release();
   });
   function cancelDrag() { if (G && G.drag) restClump(); }
@@ -327,8 +333,8 @@
     if (!d || !d.held.length) return;
     var n = d.held.length, r = clumpR(n);
     var tx = d.fp.x + d.off.x, tz = d.fp.z + d.off.z;
-    tx = clamp(tx, -W.TW / 2 + r + 0.5, W.TW / 2 - r - 0.5);
-    tz = clamp(tz, -W.TD / 2 + r + 0.5, W.TD / 2 - r - 0.5);
+    var tr = Math.hypot(tx, tz), trMax = W.TRAY_R - r - 0.5; // 둥근 접시 안으로
+    if (tr > trMax) { tx *= trMax / tr; tz *= trMax / tr; }
     var cc = cakeCenter(), dist = Math.hypot(tx - cc.x, tz - cc.z), minD = cakeR() + r + 1.2;
     if (dist < minD && G.cake.top < G.cake.layers.length) {
       var a = Math.atan2(tz - cc.z, tx - cc.x);
@@ -362,7 +368,7 @@
     });
     items.forEach(function (it, i) {
       var s = slot(i);
-      body.addShape(new CANNON.Sphere(0.48), new CANNON.Vec3(s.x, s.y, s.z));
+      body.addShape(new CANNON.Sphere(0.74), new CANNON.Vec3(s.x, s.y, s.z));
     });
     body.position.set(x, Math.max(y, clumpR(items.length) + 0.3), z);
     // 놓은 자리로 살짝 미끄러져 내려앉게
@@ -398,8 +404,10 @@
     G.dropNo += 1;
     G.dropped = true;
     bump('hud-drops');
-    var top = W.cake.topY;
-    G.drop = { items: d.held, n: d.held.length, stage: 'lift', t: 0, from: d.pos.clone(), pos: d.pos.clone(), spin: d.spin, to: new V3(W.CAKE_X, top + DROP_LIFT + clumpR(d.held.length), W.CAKE_Z), settle: 0 };
+    var tgt = (d.target || W.cakeTargetAt(d.cx, d.cy)).clone();
+    var r = clumpR(d.held.length);
+    var liftY = Math.min(W.cake.topY + DROP_LIFT, 20 - r * 0.5) + r;
+    G.drop = { items: d.held, n: d.held.length, stage: 'lift', t: 0, from: d.pos.clone(), pos: d.pos.clone(), spin: d.spin, to: new V3(tgt.x, liftY, tgt.z), target: tgt, retColor: d.retColor, vy: 0, settle: 0 };
     phase = 'drop';
     S.lift();
   }
@@ -408,33 +416,25 @@
     var D = G.drop;
     D.t += dt;
     if (D.stage === 'lift') {
-      var k = ease(clamp(D.t / 0.5, 0, 1));
+      // 예비 동작: 과녁 위로 휙 끌어올림 (살짝 넘쳤다 돌아옴)
+      var k = easeOutBack(clamp(D.t / 0.36, 0, 1));
       D.pos.lerpVectors(D.from, D.to, k);
-      D.spin += dt * 4;
-      if (D.t >= 0.5) { D.stage = 'hang'; D.t = 0; }
+      D.spin += dt * 7;
+      if (D.t >= 0.36) { D.stage = 'hang'; D.t = 0; }
     } else if (D.stage === 'hang') {
-      D.pos.y = D.to.y + Math.sin((D.t / 0.14) * Math.PI) * 0.3;
-      if (D.t >= 0.14) {
-        // 진짜 물리로 떨어뜨린다: 덩어리 전체를 하나의 몸체로
-        var CANNON = window.CANNON;
-        var body = new CANNON.Body({ mass: D.n, collisionFilterGroup: W.G.CLUMP, collisionFilterMask: W.G.CAKE | W.G.FLOOR, angularDamping: 0.6 });
-        D.items.forEach(function (it, i) {
-          var s = slot(i);
-          body.addShape(new CANNON.Sphere(0.48), new CANNON.Vec3(s.x, s.y, s.z));
-        });
-        body.position.set(D.pos.x, D.pos.y, D.pos.z);
-        body.velocity.set(0, -6, 0);
-        body.angularVelocity.set(0.6, 1.5, 0.4);
-        body.addEventListener('collide', function () { if (G.drop === D && D.stage === 'fall') D.hit = true; });
-        W.world.addBody(body);
-        D.body = body;
-        D.stage = 'fall';
-        D.t = 0;
-        S.fall();
-      }
+      // 멈칫 + 부르르: 무게를 모으는 순간
+      var hk = D.t / 0.2;
+      D.pos.set(D.to.x + Math.sin(D.t * 90) * 0.09 * hk, D.to.y + Math.sin(hk * Math.PI) * 0.6, D.to.z);
+      D.spin += dt * 2;
+      if (D.t >= 0.2) { D.stage = 'fall'; D.t = 0; D.vy = SLAM_V0; S.fall(); }
     } else if (D.stage === 'fall') {
+      // 내리꽂기: 빠르게 가속, 지나간 자리에 속도선
       var r = clumpR(D.n);
-      if (D.hit || D.body.position.y - r * 0.6 <= W.cake.topY || D.t > 1.2) impact();
+      D.vy += SLAM_G * dt;
+      D.pos.set(D.target.x, D.pos.y - D.vy * dt, D.target.z);
+      D.spin += dt * 3;
+      W.speedLines(D.pos, r, 3);
+      if (D.pos.y - r * 0.75 <= D.target.y) { D.pos.y = D.target.y + r * 0.75; impact(); }
     } else if (D.stage === 'scatter') {
       updateScatter(dt);
     }
@@ -456,41 +456,36 @@
     var lostIdx = R.pickLost(mats, G.lv, G.dropNo * 7919);
     var lostSet = {};
     lostIdx.forEach(function (i) { lostSet[i] = true; });
-    G.history.push({ layer: li, n: D.n, power: pv.power, need: pv.needPower, broke: broke, kind: pv.kind, lost: lostIdx.length, overflow: pv.overflow, gain: gain });
 
-    var bp = D.body.position;
-    var ip = new V3(bp.x, W.cake.topY, bp.z);
-    // 덩어리 몸체를 풀고 재료마다 진짜 물리 몸체로
-    var q = D.body.quaternion;
-    var worldPos = D.items.map(function (it, i) {
-      var s = slot(i);
-      var v = new window.CANNON.Vec3(s.x, s.y, s.z);
-      var w = q.vmult(v);
-      return new V3(bp.x + w.x, bp.y + w.y, bp.z + w.z);
-    });
-    W.world.removeBody(D.body);
-    D.body = null;
+    // 과녁 지점에서 국소 파괴: 판정 수치(깎인 비율)만큼, 맞은 곳에서 가까운 조각부터
+    var ip = D.target.clone();
+    tmpQ.setFromAxisAngle(new V3(0, 1, 0), D.spin);
+    var worldPos = D.items.map(function (it, i) { return slot(i).clone().applyQuaternion(tmpQ).add(D.pos); });
+    var strength = clamp((broke ? 0.55 : 0.12) + (Math.min(before, dmg) / L.maxHp) * 0.6 + D.n * 0.012, 0.12, 1.3);
+    var hit = W.hitCake(li, ip, 1 - L.hp / L.maxHp, broke, strength) || { count: 0, x: ip.x, z: ip.z };
+    G.history.push({ layer: li, n: D.n, power: pv.power, need: pv.needPower, broke: broke, kind: pv.kind, lost: lostIdx.length, overflow: pv.overflow, gain: gain,
+      hit: { x: +ip.x.toFixed(2), z: +ip.z.toFixed(2), chunks: hit.count, cx: +hit.x.toFixed(2), cz: +hit.z.toFixed(2) } });
 
     if (broke) {
       G.cake.top += 1;
-      W.breakLayer(li, ip);
       S.crumble();
       vibrate([40, 30, 70]);
-    } else {
-      W.crackLayer(li, 1 - L.hp / L.maxHp, ip);
-      vibrate([25 + Math.min(40, D.n)]);
-    }
+    } else vibrate([25 + Math.min(40, D.n)]);
+    // 무게감: 번쩍 + 충격파 + 히트스톱(잠깐 멈춤) + 카메라 툭
     S.impact(D.n, broke);
-    W.shake = Math.min(1.8, 0.5 + D.n * 0.05);
+    W.flash(ip, strength);
+    W.shockwave(ip, strength);
+    W.kick(0.45 + strength * 1.1);
+    G.stopT = 45 + strength * 70;
     W.puff(ip.x, ip.y + 0.5, ip.z, 10 + Math.min(14, D.n), 0xfff3ea);
-    floatAt(ip.x, ip.y + 3, ip.z, D.n >= 20 ? '쿵!!' : '쿵!', '#5b3a3e', 30 + Math.min(14, D.n * 0.4), 0.9);
+    floatAt(ip.x, ip.y + 3, ip.z, D.n >= 20 || broke ? '쿵!!' : '쿵!', '#5b3a3e', 44 + Math.min(22, D.n * 0.7) + (broke ? 8 : 0), 0.95, 'boom');
     var finished = G.cake.top >= G.cake.layers.length;
     if (finished) floatAt(ip.x, ip.y + 6, ip.z, '케이크 와르르!', '#ff4f7b', 30, 1.5);
     else if (broke) floatAt(ip.x, ip.y + 6, ip.z, '와르르! 한 층 끝', '#ff4f7b', 24, 1.3);
     else floatAt(ip.x, ip.y + 6, ip.z, pv.kind === 'scratch' ? '흠집만…' : '쩌억! ' + Math.round((L.hp / L.maxHp) * 100) + '% 남음', pv.kind === 'scratch' ? '#8e8e8e' : '#e67e22', 20, 1.3);
     if (gain) floatAt(ip.x + 3, ip.y + 4, ip.z, '+' + gain, '#ffb627', 18, 1);
 
-    D.items.forEach(function (it, i) { launch(it, worldPos[i], !!lostSet[i]); });
+    D.items.forEach(function (it, i) { launch(it, worldPos[i], !!lostSet[i], ip); });
     if (lostIdx.length) {
       var avg = new V3();
       D.items.forEach(function (it, i) { if (lostSet[i]) avg.add(it.target); });
@@ -503,11 +498,13 @@
   }
 
   /** 남길 재료는 쟁반 안으로, 잃을 재료는 테두리를 넘어 식탁으로 (궤도를 계산해 보장) */
-  function launch(it, p, lost) {
+  function launch(it, p, lost, hp) {
     var r = G.rand;
     var cx = W.CAKE_X, cz = W.CAKE_Z;
+    var bx = hp.x - cx, bz = hp.z - cz, hb = Math.hypot(bx, bz); // 케이크 중심 → 맞은 곳
     if (lost) {
-      var a = r() * Math.PI * 2;
+      // 가장자리를 때리면 그쪽으로 많이 튄다
+      var a = hb > 1.2 ? Math.atan2(bz, bx) + (r() - 0.5) * 2.2 : r() * Math.PI * 2;
       var ex = cx, ez = cz, dx = Math.cos(a), dz = Math.sin(a);
       while (W.insideTray(ex, ez, 0)) { ex += dx * 0.3; ez += dz * 0.3; }
       var tx = ex + dx * (3 + r() * 4), tz = ez + dz * (3 + r() * 4), ty = W.TABLE_Y + 0.5;
@@ -522,8 +519,9 @@
       it.crossed = false;
     } else {
       W.addItemBody(it, p.x, p.y, p.z, false);
-      // 닿는 바닥 쪽으로 튀게 (케이크 뒤 가려진 곳 피하기)
-      var aa = Math.atan2(p.z - cz, p.x - cx) + (r() - 0.5) * 1.2;
+      // 맞은 곳에서 바깥으로 + 가장자리를 맞으면 그쪽으로 (닿는 바닥만, 케이크 뒤 가려진 곳 피하기)
+      var vx = p.x - hp.x + bx * 0.9, vz = p.z - hp.z + bz * 0.9;
+      var aa = Math.hypot(vx, vz) > 0.3 ? Math.atan2(vz, vx) + (r() - 0.5) * 0.9 : r() * Math.PI * 2;
       for (var tries = 0; tries < 16; tries++) {
         var dist = cakeR() + 3 + r() * 5;
         if (reachable(cx + Math.cos(aa) * dist, cz + Math.sin(aa) * dist)) break;
@@ -708,8 +706,9 @@
     var n = d.held.length, r = clumpR(n);
     var target;
     if (d.aim && n) {
-      // 조준 중: 덩어리가 케이크 윗면 위에 착 붙어 "여기 떨어진다"를 보여 줌
-      target = new V3(W.CAKE_X, W.cake.topY + r + 0.4, W.CAKE_Z);
+      // 조준 중: 덩어리가 과녁 바로 위에 떠서 "여기 떨어진다"를 보여 줌 (손가락은 과녁, 덩어리는 그 위 → 손에 안 가림)
+      if (!d.target) d.target = W.cakeTargetAt(d.cx, d.cy);
+      target = new V3(d.target.x, d.target.y + r + HOVER, d.target.z);
     } else {
       target = new V3(d.fp.x + d.off.x, r + 0.9, d.fp.z + d.off.z);
     }
@@ -732,11 +731,7 @@
   function updateDropClump() {
     var D = G.drop;
     if (!D || D.stage === 'scatter') return;
-    if (D.body) {
-      var bq = D.body.quaternion;
-      tmpQ.set(bq.x, bq.y, bq.z, bq.w);
-      D.pos.set(D.body.position.x, D.body.position.y, D.body.position.z);
-    } else tmpQ.setFromAxisAngle(new V3(0, 1, 0), D.spin);
+    tmpQ.setFromAxisAngle(new V3(0, 1, 0), D.spin);
     D.items.forEach(function (it, i) {
       it.mesh.position.copy(slot(i).clone().applyQuaternion(tmpQ).add(D.pos));
     });
@@ -747,10 +742,13 @@
     var dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     if (G) {
-      W.world.step(1 / 60, dt, 4);
+      // 히트스톱: 충돌 순간 세상이 잠깐 멈춤 (입력·카메라는 그대로)
+      var sdt = dt;
+      if (G.stopT > 0) { G.stopT -= dt * 1000; sdt = 0; }
+      if (sdt > 0) W.world.step(1 / 60, sdt, 4);
       syncAll();
       updateDrag(dt);
-      if (G.drop) updateDrop(dt);
+      if (G.drop) updateDrop(sdt);
       updateDropClump();
       if (phase === 'finale' && G.finale) updateFinale(dt);
       if (phase === 'play') {
@@ -765,15 +763,15 @@
           }
         });
       }
-      W.updateFx(dt);
+      W.updateFx(sdt);
       W.shake *= Math.exp(-dt * 8);
       updateBrush();
-      if (G.drag && G.drag.held.length) W.setBlob(G.drag.pos, clumpR(G.drag.held.length));
-      else if (G.drop && G.drop.stage !== 'scatter') W.setBlob(G.drop.pos, clumpR(G.drop.n));
+      if (G.drag && G.drag.held.length) W.setBlob(G.drag.pos, clumpR(G.drag.held.length), G.drag.aim && G.drag.target ? G.drag.target.y : null);
+      else if (G.drop && G.drop.stage !== 'scatter') W.setBlob(G.drop.pos, clumpR(G.drop.n), G.drop.target.y);
       else W.setBlob(null);
       updateUI();
     }
-    W.render();
+    W.render(dt);
     requestAnimationFrame(frame);
   }
 
@@ -855,6 +853,13 @@
       ch.style.top = bp.y - wrap.getBoundingClientRect().top + 'px';
     } else ch.style.display = 'none';
 
+    // 과녁: 색이 곧 결과 (초록 와르르 · 주황 금 · 회색 흠집)
+    if (pv && G.drag.target) {
+      G.drag.retColor = pv.breaks ? 0x2fd17a : pv.kind === 'crack' ? 0xffa53a : 0xbdbdbd;
+      W.setReticle(G.drag.target, clumpR(pv.n) * 0.8, G.drag.retColor);
+    } else if (G.drop && G.drop.stage !== 'scatter') W.setReticle(G.drop.target, clumpR(G.drop.n) * 0.8, G.drop.retColor);
+    else W.setReticle(null);
+
     // 조준 카드
     var card = $('aimcard');
     if (pv) {
@@ -870,13 +875,10 @@
       if (hudCache.card !== html2) { hudCache.card = html2; card.innerHTML = html2; }
       card.style.setProperty('--c', color);
       card.style.display = 'block';
-      var tp = W.project(W.CAKE_X, W.cake.topY + clumpR(pv.n) * 2 + 1.8, W.CAKE_Z);
+      // 화면 위쪽 고정 (덩어리·과녁·개수 말풍선을 가리지 않게)
       var wr = wrap.getBoundingClientRect();
-      var cw = card.offsetWidth, chh = card.offsetHeight;
-      var x = clamp(tp.x - wr.left - cw / 2, 8, wr.width - cw - 8), y = tp.y - wr.top - chh - 6;
-      if (y < 48) y = 48;
-      card.style.left = x + 'px';
-      card.style.top = y + 'px';
+      card.style.left = Math.max(8, (wr.width - card.offsetWidth) / 2) + 'px';
+      card.style.top = '8px';
     } else card.style.display = 'none';
 
     // 개수 말풍선 + 놓아둔 덩어리 배지
@@ -910,11 +912,11 @@
     canvas.style.cursor = phase === 'play' ? (G.drag ? 'grabbing' : 'crosshair') : 'default';
   }
 
-  function floatAt(x, y, z, text, color, size, life) {
+  function floatAt(x, y, z, text, color, size, life, cls) {
     var p = W.project(x, y, z);
     var wr = wrap.getBoundingClientRect();
     var el = document.createElement('div');
-    el.className = 'ftext';
+    el.className = 'ftext' + (cls ? ' ' + cls : '');
     el.textContent = text;
     el.style.left = clamp(p.x - wr.left, 40, wr.width - 40) + 'px';
     el.style.top = clamp(p.y - wr.top, 20, wr.height - 20) + 'px';
@@ -1241,6 +1243,9 @@
           return { n: cl.items.length, sx: Math.round(p.x), sy: Math.round(p.y) };
         }),
         cakeAim: { sx: Math.round(cp.x), sy: Math.round(cp.y) },
+        target: G.drag && G.drag.target ? { x: +G.drag.target.x.toFixed(2), y: +G.drag.target.y.toFixed(2), z: +G.drag.target.z.toFixed(2) } : null,
+        cakeCenter: { x: W.CAKE_X, z: W.CAKE_Z },
+        chunksLeft: W.cake ? W.cake.layers.map(function (l) { return l.chunks.filter(function (m) { return !m.userData.gone; }).length; }) : [],
         brushRadius: BRUSH_R, history: G.history, save: save,
         hiddenItems: G.items.filter(function (it) { return (it.state === 'floor' || it.state === 'clump') && it.body && !reachable(it.body.position.x, it.body.position.z); }).length
       }));
@@ -1250,7 +1255,9 @@
       var fp = W.floorPoint(cx, cy, 0.5);
       return { aim: aimAt(cx, cy), x: fp ? +fp.x.toFixed(2) : null, z: fp ? +fp.z.toFixed(2) : null };
     },
-    project: function (x, y, z) { return W.project(x, y, z); }
+    project: function (x, y, z) { return W.project(x, y, z); },
+    /** 화면 좌표가 가리키는 과녁 (읽기 전용) */
+    targetAt: function (cx, cy) { var t = W.cakeTargetAt(cx, cy); return t ? { x: +t.x.toFixed(2), y: +t.y.toFixed(2), z: +t.z.toFixed(2) } : null; }
   };
 
   resize();
