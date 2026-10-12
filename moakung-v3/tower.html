@@ -3,18 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-<title>몽글탑 목업 v0.2</title>
+<title>몽글탑 목업 v0.3</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
 <!--
-  모아쿵! 몽글탑 — 목업 v0.2 (판 1개를 깊게)
+  모아쿵! 몽글탑 — 목업 v0.3 (판 1개를 깊게)
+  v0.3: 블록·양동이에 체력(금·눈금 표시) → "절반 깎였네, 한 번 더"가 보인다. 떨어질 자리는 반투명 친구 그림자로 미리보기.
+        쌓을 때 탑이 출렁이고, 언덕 친구 표정이 "지금 내가 올라가면 위험한지"를 미리 보여 준다(태평 → 땀 → 질겁).
   가설: 친구를 "한 번 쓰면 끝인 카드"로 만들고, 무게·바닥 면적에 따라 쌓을수록 흔들리게 하면
         "누구를 지금 쓰고 누구를 아낄까"(머리)와 "하나만 더 올릴까?"(손의 긴장)가 생긴다.
   - 흔들림: 이음새마다 (위 무게 × 무게중심 높이) ÷ 받치는 폭. 한계를 넘으면 가장 약한 이음새 위가 뒤로 쏟아져 그 친구들을 잃는다.
   - 넘어지는 친구는 밑동을 축으로 원호를 그린다. 앞에 원호보다 높은 벽이 있으면 거기 걸린다 → 벽을 먼저 열어야 왕두더지에 닿는다.
   - 미리보기(아이콘·원호·떨림)와 실제 착지는 같은 simulate() 결과 → 항상 일치.
-  - 판 구성은 전수 탐색으로 확인: 최선 = 친구 4마리 남기고 승리, 첫 밀기 후보의 37%가 이길 수 있는 길.
+  - 판 구성은 전수 탐색으로 확인(tools/solve.js): 최선 = 친구 4마리 남기고 승리, 첫 밀기 후보의 44%가 이길 수 있는 길.
 -->
 <style>
   :root { --ink:#3b2a22; --pill:rgba(255,255,255,.92); --line:#e7d6c8; --accent:#ff7a59; --gold:#ffc23a; color-scheme: light; }
@@ -61,14 +63,16 @@
 </div>
 <script>
 /*RULES-START*/
-// 몽글탑 v0.2 규칙 (목업과 계산기가 같이 씀)
+// 몽글탑 v0.3 규칙 (목업과 계산기가 같이 씀)
 var KIND = {
   mong:  { h: 1.0, wb: 0.5,  wt: 0.5,  m: 1.0 },
   gil:   { h: 2.5, wb: 0.6,  wt: 0.55, m: 1.2 },
   kwang: { h: 1.0, wb: 1.3,  wt: 1.2,  m: 3.0 },
   puff:  { h: 0.8, wb: 0.4,  wt: 0.35, m: 0.5 }
 };
-var RULE = { LIMIT: 24, STUMP: 0.6, KING: 5, KING_END: 6, KWANG2: 3 };   // 왕두더지는 5·6번 칸(2칸 너비)
+var RULE = { LIMIT: 24, STUMP: 0.6, KING: 5, KING_END: 6, HP: { W: 2, S: 3 }, BUCKET_HP: 3 };   // 왕두더지는 5·6번 칸(2칸 너비)
+/** 친구가 칠 때의 힘: 높이 있을수록 셈 (lvl = 탑에서 몇 번째, 0부터) */
+function power(kind, lvl) { return kind === 'mong' ? 1 + (lvl >> 1) : kind === 'kwang' ? 2 + lvl : kind === 'puff' ? (lvl >= 3 ? 3 : 2) : 1; }   // 꽝돌은 한 층 오를 때마다 +1 (높이 올릴수록 위험하지만 셈)
 /** 탑 흔들림: 이음새마다 (위 무게 × 무게중심 높이) ÷ 받치는 폭. R = 최댓값 / LIMIT, R > 1 이면 가장 약한 이음새 위가 무너짐 */
 function stability(kinds) {
   var n = kinds.length, B = [], b = 0, best = 0, weak = -1, T = [];
@@ -88,51 +92,49 @@ function blockAt(cols, c) {
   for (var j = 0; j < Math.min(land, RULE.KING); j++) {
     var H = cols[j].cells.length;
     if (!H) continue;
-    var y = Math.sqrt(Math.max(0, c * c - j * j));
-    if (y < H + 0.5) return j;
+    if (Math.sqrt(Math.max(0, c * c - j * j)) < H + 0.5) return j;
   }
   return -1;
 }
-function simulate(cols0, buckets, kinds) {
-  var cols = cols0.map(function (c) { return { cells: c.cells.slice(), mole: c.mole }; });
-  var bk = buckets, base = 0, ev = [];
-  function hit(col, kind, lvl) {
-    var h = { col: col, broke: [], mole: false, bucket: false, clang: false, ding: false, miss: false };
+function cloneCols(cols) { return cols.map(function (c) { return { cells: c.cells.map(function (x) { return { m: x.m, hp: x.hp }; }), mole: c.mole }; }); }
+/** 기둥·왕두더지에 힘을 넣는다. 맨 위 칸부터 깎고, 남은 힘은 아래 칸으로 이어진다. 양동이는 3씩 깎아야 하나 벗겨진다 */
+function simulate(cols0, king0, kinds) {
+  var cols = cloneCols(cols0), king = { buckets: king0.buckets, dmg: king0.dmg }, base = 0, ev = [];
+  function hit(col, d, kind) {
+    var h = { col: col, power: d, dmg: [], broke: [], mole: false, bucket: 0, dent: 0, miss: false };
     if (col > RULE.KING_END || col < 0) { h.miss = true; return h; }
     if (col >= RULE.KING) {
       h.col = RULE.KING;
-      // 양동이: 꽝돌은 1개(KWANG2 레벨 이상 높이면 한 방에 2개), 몽이는 3층(레벨 2) 이상이면 1개, 길쭉·부풀은 못 벗김
-      var n = kind === 'kwang' ? (lvl >= RULE.KWANG2 ? 2 : 1) : kind === 'mong' ? (lvl >= 2 ? 1 : 0) : 0;   // 부풀 폭발은 양동이를 못 벗김
-      var take = Math.min(n, bk);
-      if (take) { bk -= take; h.bucket = take; } else h.clang = true;
+      if (kind === 'puff' || king.buckets <= 0) return h;   // 부풀 폭발은 양동이를 못 깎음
+      var tot = king.dmg + d, take = Math.min(king.buckets, Math.floor(tot / RULE.BUCKET_HP));
+      king.buckets -= take; king.dmg = king.buckets > 0 ? tot - take * RULE.BUCKET_HP : 0;
+      h.bucket = take; h.dent = d;
       return h;
     }
-    var c = cols[col], top = function () { return c.cells[c.cells.length - 1]; };
-    if (kind === 'kwang') { for (var a = 0; a < 2 && c.cells.length; a++) h.broke.push(c.cells.pop()); }
-    else if (kind === 'puff') { if (c.cells.length) h.broke.push(c.cells.pop()); }
-    else {
-      var p = kind === 'mong' ? 1 + (lvl >> 1) : 1;
-      for (var q = 0; q < p && c.cells.length && top() === 'W'; q++) h.broke.push(c.cells.pop());
-      if (!h.broke.length && c.cells.length) h.ding = true;
+    var c = cols[col];
+    while (d > 0 && c.cells.length) {
+      var top = c.cells[c.cells.length - 1], use = Math.min(d, top.hp);
+      top.hp -= use; d -= use; h.dmg.push({ idx: c.cells.length - 1, use: use });
+      if (top.hp <= 0) { c.cells.pop(); h.broke.push(top.m); }
     }
     if ((h.broke.length || !c.cells.length) && c.mole) { c.mole = false; h.mole = true; }
     return h;
   }
   kinds.forEach(function (kind, i) {
-    var K = KIND[kind], c = base + K.h / 2, hits = [], blk = blockAt(cols, c), span = null, land;
+    var K = KIND[kind], c = base + K.h / 2, hits = [], blk = blockAt(cols, c), span = null, land, p = power(kind, i);
     if (kind === 'gil') {
-      if (blk >= 0) span = [blk, blk + 1]; else span = [Math.floor(base + 1e-6), Math.floor(base + K.h - 1e-6)];
-      for (var x = span[0]; x <= span[1]; x++) hits.push(hit(x, kind, i));
+      span = blk >= 0 ? [blk, blk + 1] : [Math.floor(base + 1e-6), Math.floor(base + K.h - 1e-6)];
+      for (var x = span[0]; x <= span[1]; x++) hits.push(hit(x, p, kind));
       land = blk >= 0 ? blk : Math.floor(base + K.h / 2);
     } else {
       land = blk >= 0 ? blk : Math.floor(c);
-      if (kind === 'puff') { var r = i >= 3 ? 2 : 1; span = [land - r, land + r]; for (var y2 = land - r; y2 <= land + r; y2++) if (y2 >= 0 && y2 < RULE.KING) hits.push(hit(y2, kind, i)); }   // 높을수록 크게 터짐(반경 1→2), 벽만 부숨
-      else hits.push(hit(land, kind, i));
+      if (kind === 'puff') { var r = i >= 3 ? 2 : 1; span = [land - r, land + r]; for (var y2 = land - r; y2 <= land + r; y2++) if (y2 >= 0 && y2 < RULE.KING) hits.push(hit(y2, p, kind)); }
+      else hits.push(hit(land, p, kind));
     }
-    ev.push({ i: i, kind: kind, base: base, center: c, land: land, blocked: blk >= 0, span: span, hits: hits });
+    ev.push({ i: i, kind: kind, base: base, center: c, land: land, blocked: blk >= 0, span: span, power: p, hits: hits });
     base += K.h;
   });
-  return { ev: ev, cols: cols, buckets: bk };
+  return { ev: ev, cols: cols, king: king };
 }
 /*RULES-END*/
 
@@ -147,10 +149,10 @@ function simulate(cols0, buckets, kinds) {
     kwang: { w: 1.3,  col: '#a3acb6', dark: '#5e6873', name: '꽝돌' },
     puff:  { w: 0.86, col: '#ff5d5d', dark: '#c8302f', name: '부풀' }
   };
-  var ROSTER = ['kwang', 'mong', 'gil', 'mong', 'kwang', 'puff', 'mong', 'gil', 'kwang', 'mong', 'gil', 'mong'];   // 꽝돌3 길쭉3 몽이5 부풀1
-  var BOARD = [['W', 'W'], ['S', 'W'], ['W', 'W', 'W'], ['W', 'S'], ['W', 'W', 'S', 'S']];                     // 4번 = 왕두더지 앞 벽 (꼭대기 돌)
+  var ROSTER = ['kwang', 'mong', 'gil', 'mong', 'puff', 'mong', 'kwang', 'gil', 'mong', 'kwang', 'mong', 'gil', 'mong'];   // 꽝돌3 길쭉3 몽이6 부풀1
+  var BOARD = [['W', 'W'], ['S', 'W'], ['W', 'W', 'W'], ['W', 'S'], ['W', 'W', 'W', 'S']];                                 // 4번 = 왕두더지 앞 벽 (꼭대기 돌)
   var BUCKETS = 3;
-  var BEST_KEY = 'mongle.v02.best';
+  var BEST_KEY = 'mongle.v03.best';
 
   /* ---------------- 레이아웃 ---------------- */
   var s = 1, dpr = 1, Wl = 390, Hl = 760, ox = 0, groundY = 500, hillTop = 530, pivotX = 64, towerX = 40;
@@ -165,10 +167,10 @@ function simulate(cols0, buckets, kinds) {
     cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
     if (G) G.friends.forEach(function (f) { var h = homeOf(f.home); f.hx = h.x; f.hy = h.y; if (f.state === 'hill') { f.x = h.x; f.y = h.y; } });
   }
-  function homeOf(i) { var row = i < 6 ? 0 : 1, k = row ? i - 6 : i; return { x: ox + 36 + k * 64 + (row ? 30 : 0), y: hillTop + (row ? 186 : 98) }; }
+  function homeOf(i) { var row = i < 7 ? 0 : 1, k = row ? i - 7 : i; return { x: ox + (row ? 50 : 22) + k * 57, y: hillTop + (row ? 186 : 98) }; }
   function colX(c) { return pivotX + (c + 0.5) * C; }
   var KING_X = function () { return pivotX + (RULE.KING + 1) * C; };   // 왕두더지 가운데 (5·6번 칸 사이)
-  function kingTopY() { return groundY - 60 - G.buckets * 13; }   // 쌓인 양동이 맨 위 (양동이 0개면 머리 꼭대기)
+  function kingTopY() { return groundY - 60 - G.king.buckets * 13; }   // 쌓인 양동이 맨 위 (양동이 0개면 머리 꼭대기)
   function colTop(c) { return c < RULE.KING ? groundY - G.cols[c].cells.length * C : kingTopY(); }
 
   /* ---------------- 상태 ---------------- */
@@ -177,8 +179,8 @@ function simulate(cols0, buckets, kinds) {
   function saveBest(b) { try { localStorage.setItem(BEST_KEY, JSON.stringify(b)); } catch (e) { /* 무시 */ } }
   function newGame() {
     G = {
-      state: 'build', score: 0, buckets: BUCKETS, angle: 0, angleV: 0,
-      cols: BOARD.map(function (c) { return { cells: c.slice(), mole: true }; }),
+      state: 'build', score: 0, king: { buckets: BUCKETS, dmg: 0 }, angle: 0, angleV: 0, sway: 0, swayV: 0,
+      cols: BOARD.map(function (c) { return { cells: c.map(function (m) { return { m: m, hp: RULE.HP[m] }; }), mole: true }; }),
       friends: ROSTER.map(function (k, i) { var h = homeOf(i); return { id: i, kind: k, home: i, state: 'hill', x: h.x, y: h.y, hx: h.x, hy: h.y, bob: Math.random() * 6, sq: 0 }; }),
       tower: [], drag: null, simKey: '', sim: null, stab: { R: 0, weak: -1 }, t: 0,
       fx: [], pops: [], freeze: 0, shake: 0, slow: 1, zoom: 0, idleT: 0, ghost: firstRun, boarded: false, pushTotal: 0, ko: 0, best: loadBest()
@@ -187,11 +189,22 @@ function simulate(cols0, buckets, kinds) {
   }
   function friendsLeft() { return G.friends.filter(function (f) { return f.state === 'hill' || f.state === 'tower' || f.state === 'board' || f.state === 'unboard'; }).length; }
   function towerKinds() { return G.tower.map(function (f) { return f.kind; }); }
+  function boardKey() { return G.cols.map(function (c) { return c.cells.map(function (x) { return x.m + x.hp; }).join('') + (c.mole ? 'm' : ''); }).join('/') + '|' + G.king.buckets + ':' + G.king.dmg; }
   function currentSim() {
-    var key = towerKinds().join(',') + '|' + G.cols.map(function (c) { return c.cells.join('') + (c.mole ? 'm' : ''); }).join('/') + '|' + G.buckets;
-    if (key !== G.simKey) { G.simKey = key; G.sim = simulate(G.cols, G.buckets, towerKinds()); G.stab = stability(towerKinds()); }
+    var key = towerKinds().join(',') + '|' + boardKey();
+    if (key !== G.simKey) { G.simKey = key; G.sim = simulate(G.cols, G.king, towerKinds()); G.stab = stability(towerKinds()); }
     return G.sim;
   }
+  /** 언덕 친구마다: 지금 탑 위에 올라가면 흔들림이 얼마가 되나 (표정으로 보여 줌) */
+  function hillRisk() {
+    var key = towerKinds().join(',');
+    if (key !== G.riskKey) {
+      G.riskKey = key; G.risk = {};
+      ['mong', 'gil', 'kwang', 'puff'].forEach(function (k) { G.risk[k] = G.tower.length >= MAX_TOWER ? 0 : G.tower.length ? stability(towerKinds().concat([k])).R : 0; });
+    }
+    return G.risk;
+  }
+  function moodOf(R) { return R > 1 ? 3 : R >= 0.8 ? 2 : R >= 0.6 ? 1 : 0; }
 
   /* ---------------- 소리·진동 ---------------- */
   var AC = null;
@@ -223,6 +236,8 @@ function simulate(cols0, buckets, kinds) {
     latch: function () { tone('square', 900, 600, 0.04, 0.12); tone('sine', 300, 0, 0.06, 0.2); },
     thud: function (p) { tone('sine', 140 + p * 10, 40, 0.32, Math.min(0.9, 0.4 + p * 0.15)); noise(0.18, 0.28 + p * 0.08, 500 + p * 200); tone('triangle', 1800, 900, 0.05, 0.06); },
     crack: function (stone) { noise(0.12, 0.35, stone ? 2400 : 1500, 'bandpass'); tone('square', stone ? 220 : 160, 80, 0.07, 0.1); },
+    chip: function (stone) { tone('triangle', stone ? 1400 : 900, stone ? 1100 : 600, 0.08, 0.14); noise(0.06, 0.2, stone ? 3000 : 1800, 'bandpass'); },
+    dent: function () { tone('square', 520, 480, 0.18, 0.08); tone('triangle', 1040, 980, 0.12, 0.06); },
     ding: function () { tone('triangle', 1500, 0, 0.18, 0.18); tone('sine', 2250, 0, 0.12, 0.08); },
     clang: function () { [700, 943, 1210, 1580].forEach(function (f, i) { tone('square', f, f * 0.98, 0.45 - i * 0.06, 0.05); }); },
     boom: function () { noise(0.5, 0.6, 700); tone('sine', 90, 30, 0.6, 0.8); },
@@ -322,10 +337,12 @@ function simulate(cols0, buckets, kinds) {
   function arrive(f) {
     f.state = 'tower'; f.sq = 0.7;
     if (G.state !== 'build') return;   // 이미 휘청이는 중이면 판정은 한 번만
-    if (KIND[f.kind].heavy || f.kind === 'kwang') G.tower.forEach(function (o) { if (o !== f) o.sq = Math.max(o.sq, 0.55); });
+    if (f.kind === 'kwang') G.tower.forEach(function (o) { if (o !== f) o.sq = Math.max(o.sq, 0.55); });
     var st = stability(towerKinds());
+    // 올라탈 때마다 탑이 출렁: 흔들림이 클수록 크게, 오래
+    G.swayV += (G.tower.length % 2 ? 1 : -1) * (25 + 160 * st.R * st.R);
     if (st.R > 1) { G.state = 'teeter'; G.tt = 0; G.weak = st.weak; SND.creak(1); buzz([20, 40, 20]); }
-    else if (st.R >= 0.6) SND.creak(st.R);
+    else if (st.R >= 0.45) { SND.creak(st.R); buzz(Math.round(10 + st.R * 30)); if (st.weak > 0) { var sl = towerSlot(st.weak); dust(sl.x, sl.y); } }
   }
   function collapse() {
     var w = G.weak, lost = G.tower.slice(w);
@@ -343,9 +360,9 @@ function simulate(cols0, buckets, kinds) {
 
   /* ---------------- 넘어뜨리기 ---------------- */
   function commit() {
-    G.events = simulate(G.cols, G.buckets, towerKinds()).ev;   // 미리보기와 같은 계산을 확정
+    G.events = simulate(G.cols, G.king, towerKinds()).ev;   // 미리보기와 같은 계산을 확정
     G.finalIdx = -1;
-    var bk = G.buckets;
+    var bk = G.king.buckets;
     G.events.forEach(function (ev) { ev.hits.forEach(function (h) { if (h.bucket) { bk -= h.bucket; if (bk <= 0 && G.finalIdx < 0) G.finalIdx = ev.i; } }); });
     G.state = 'topple'; G.tt = 0; G.a0 = G.angle; G.pushTotal = 0;
     SND.swoosh();
@@ -391,34 +408,44 @@ function simulate(cols0, buckets, kinds) {
       if (h.miss) return;
       var x = h.col >= RULE.KING ? KING_X() : colX(h.col);
       if (h.col >= RULE.KING) {
-        if (h.bucket) {
-          for (var b = 0; b < h.bucket; b++) {
-            G.buckets--; gain += 300;
-            G.fx.push({ type: 'bucket', x: x + b * 10, y: kingTopY() - b * 10, vx: 160 + Math.random() * 80 + b * 60, vy: -440 - b * 80, r: 0, vr: 9 + b * 3, t: 0, life: 1.6 });
-          }
-          SND.clang(); G.freeze = Math.max(G.freeze, h.bucket > 1 ? 130 : 90); G.shake = Math.max(G.shake, h.bucket > 1 ? 14 : 10); buzz(h.bucket > 1 ? [40, 30, 60] : 45);
-          sparks(x, kingTopY(), '#fff6b0', 14 + h.bucket * 6);
-          strong = 2;
-        } else { SND.tang(); sparks(x, kingTopY(), '#ffffff', 8); G.king = 0.4; }
+        if (!h.dent) { if (fl.f.kind !== 'puff') { SND.tang(); sparks(x, kingTopY(), '#ffffff', 8); G.king2 = 0.4; } return; }
+        G.king.dmg += h.dent; G.dentFlash = 0.5;
+        var flew = 0;
+        while (G.king.dmg >= RULE.BUCKET_HP && G.king.buckets > 0) {
+          G.king.buckets--; G.king.dmg -= RULE.BUCKET_HP; gain += 300;
+          G.fx.push({ type: 'bucket', x: x + flew * 10, y: kingTopY() - flew * 10, vx: 160 + Math.random() * 80 + flew * 60, vy: -440 - flew * 80, r: 0, vr: 9 + flew * 3, t: 0, life: 1.6 });
+          flew++;
+        }
+        if (G.king.buckets <= 0) G.king.dmg = 0;
+        gain += h.dent * 10;
+        if (flew) { SND.clang(); G.freeze = Math.max(G.freeze, flew > 1 ? 130 : 90); G.shake = Math.max(G.shake, flew > 1 ? 14 : 10); buzz(flew > 1 ? [40, 30, 60] : 45); sparks(x, kingTopY(), '#fff6b0', 14 + flew * 6); strong = 2; }
+        else { SND.dent(); sparks(x, kingTopY(), '#ffffff', 10); G.king2 = 0.35; strong = Math.max(strong, 1); }
         return;
       }
-      var col = G.cols[h.col], y = colTop(h.col);
-      h.broke.forEach(function (m, k) {
-        col.cells.pop();
-        gain += m === 'S' ? 80 : 50;
-        debris(x, groundY - (col.cells.length + 0.5) * C, m);
-        setTimeout(function () { SND.crack(m === 'S'); }, k * 60);
-        strong = Math.max(strong, m === 'S' ? 2 : 1);
+      var col = G.cols[h.col];
+      h.dmg.forEach(function (d, k) {
+        var top = col.cells[col.cells.length - 1];
+        if (!top) return;
+        top.hp -= d.use; gain += d.use * 10;
+        var cy = groundY - (col.cells.length - 0.5) * C;
+        if (top.hp <= 0) {
+          col.cells.pop(); gain += top.m === 'S' ? 80 : 50;
+          debris(x, cy, top.m);
+          (function (m, k) { setTimeout(function () { SND.crack(m === 'S'); }, k * 60); })(top.m, k);
+          strong = Math.max(strong, top.m === 'S' ? 2 : 1);
+        } else {
+          chips(x, cy - C * 0.3, top.m); SND.chip(top.m === 'S'); top.flash = 0.35;
+          strong = Math.max(strong, 1);
+        }
       });
-      if (h.ding) { SND.ding(); sparks(x, y, '#ffffff', 10); }
-      if (h.mole) { col.mole = false; gain += 100; G.fx.push({ type: 'mole', x: x, y: y - 14, vx: (Math.random() - 0.3) * 120, vy: -380, r: 0, vr: 8, t: 0, life: 1.2 }); SND.pop(); }
-      if (h.broke.length) dust(x, y);
+      if (h.mole) { col.mole = false; gain += 100; G.fx.push({ type: 'mole', x: x, y: colTop(h.col) - 14, vx: (Math.random() - 0.3) * 120, vy: -380, r: 0, vr: 8, t: 0, life: 1.2 }); SND.pop(); }
+      if (h.broke.length) dust(x, colTop(h.col));
     });
-    var any = ev.hits.some(function (h) { return !h.miss; });
+    var any = ev.hits.some(function (h) { return !h.miss && (h.dmg.length || h.dent || h.col < RULE.KING); });
     if (any) { SND.thud(Math.max(1, strong)); buzz(strong >= 2 ? 35 : 18); G.shake = Math.max(G.shake, 3 + strong * 2.5); if (strong >= 2) G.freeze = Math.max(G.freeze, 60); }
     else SND.whiff();
-    if (gain) { G.score += gain; G.pushTotal += gain; var hc = Math.min(ev.hits[0].col, RULE.KING); popup('+' + gain, hc >= RULE.KING ? KING_X() : colX(hc), Math.max(120, colTop(hc) - 46), 22, '#ffffff'); hud(); }
-    if (G.buckets <= 0 && !G.ko) { G.ko = 1; G.koT = 0; SND.ko(); G.freeze = 160; G.shake = 16; buzz([80, 50, 120]); }
+    if (gain) { G.score += gain; G.pushTotal += gain; var hc = Math.min(ev.hits.length ? ev.hits[0].col : ev.land, RULE.KING); popup('+' + gain, hc >= RULE.KING ? KING_X() : colX(hc), Math.max(120, colTop(hc) - 46), 22, '#ffffff'); hud(); }
+    if (G.king.buckets <= 0 && !G.ko) { G.ko = 1; G.koT = 0; SND.ko(); G.freeze = 160; G.shake = 16; buzz([80, 50, 120]); }
     fl.f.sq = 0.6;
   }
 
@@ -426,6 +453,10 @@ function simulate(cols0, buckets, kinds) {
   function debris(x, y, m) {
     var col = m === 'S' ? ['#9aa3ad', '#7d8792', '#c3cad1'] : ['#c98a4b', '#a96e35', '#e0a868'];
     for (var i = 0; i < 10; i++) G.fx.push({ type: 'chip', x: x + (Math.random() - 0.5) * C * 0.7, y: y + (Math.random() - 0.5) * C * 0.6, vx: (Math.random() - 0.3) * 340, vy: -150 - Math.random() * 340, r: Math.random() * 6, vr: (Math.random() - 0.5) * 20, w: 6 + Math.random() * 10, h: 5 + Math.random() * 8, c: col[i % 3], t: 0, life: 1.1 + Math.random() * 0.5 });
+  }
+  function chips(x, y, m) {
+    var col = m === 'S' ? ['#9aa3ad', '#c3cad1'] : ['#c98a4b', '#e0a868'];
+    for (var i = 0; i < 5; i++) G.fx.push({ type: 'chip', x: x + (Math.random() - 0.5) * C * 0.6, y: y, vx: (Math.random() - 0.5) * 200, vy: -120 - Math.random() * 160, r: Math.random() * 6, vr: (Math.random() - 0.5) * 20, w: 4 + Math.random() * 5, h: 3 + Math.random() * 4, c: col[i % 2], t: 0, life: 0.8 });
   }
   function dust(x, y) { for (var i = 0; i < 6; i++) G.fx.push({ type: 'dust', x: x + (Math.random() - 0.5) * 30, y: y - 6, vx: (Math.random() - 0.5) * 90, vy: -20 - Math.random() * 40, t: 0, life: 0.6 + Math.random() * 0.3, s: 10 + Math.random() * 10 }); }
   function sparks(x, y, c, n) { for (var i = 0; i < n; i++) { var a = Math.random() * Math.PI * 2, v = 150 + Math.random() * 220; G.fx.push({ type: 'spark', x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, c: c, t: 0, life: 0.35 + Math.random() * 0.2 }); } }
@@ -443,6 +474,10 @@ function simulate(cols0, buckets, kinds) {
       if (f.state === 'board') { f.bk += dt / 0.22; if (f.bk >= 1) arrive(f); }
       else if (f.state === 'unboard') { f.bk += dt / 0.22; if (f.bk >= 1) { f.state = 'hill'; f.x = f.hx; f.y = f.hy; f.sq = 0.5; } }
     });
+    // 탑 출렁임 (올라탈 때 생긴 흔들림이 서서히 잦아듦)
+    G.sway += G.swayV * dt; G.swayV += (-G.sway * 110 - G.swayV * 3.2) * dt;
+    G.cols.forEach(function (c) { c.cells.forEach(function (x) { if (x.flash) x.flash = Math.max(0, x.flash - dt); }); });
+    G.dentFlash = Math.max(0, (G.dentFlash || 0) - dt); G.king2 = Math.max(0, (G.king2 || 0) - rdt);
     if (st === 'build') {
       if (!G.drag) { G.angle += G.angleV * dt; G.angleV += (-G.angle * 260 - G.angleV * 14) * dt; if (Math.abs(G.angle) < 0.02 && Math.abs(G.angleV) < 0.05) { G.angle = 0; G.angleV = 0; } }
       G.idleT += dt;
@@ -496,7 +531,6 @@ function simulate(cols0, buckets, kinds) {
       if (kl >= 1) { G.flying = null; G.angle = 0; G.angleV = 0; G.zoom = 0; G.state = 'build'; G.idleT = 0; checkLose(); }
     }
     if (G.zoom > 0 && G.state !== 'resolve' && G.state !== 'win') G.zoom = Math.max(0, G.zoom - rdt * 2);
-    G.king = Math.max(0, (G.king || 0) - rdt);
     G.fx = G.fx.filter(function (p) {
       p.t += dt;
       if (p.type === 'dust') { p.x += p.vx * dt; p.y += p.vy * dt; p.s += 40 * dt; }
@@ -506,7 +540,7 @@ function simulate(cols0, buckets, kinds) {
     G.pops = G.pops.filter(function (p) { p.t += dt; return p.t < p.life; });
   }
   function checkLose() {
-    if (G.buckets > 0 && friendsLeft() === 0) { G.state = 'lose'; SND.lose(); setTimeout(showLose, 450); }
+    if (G.king.buckets > 0 && friendsLeft() === 0) { G.state = 'lose'; SND.lose(); setTimeout(showLose, 450); }
   }
 
   /* ---------------- 그리기 ---------------- */
@@ -530,8 +564,9 @@ function simulate(cols0, buckets, kinds) {
   }
   function tuft(x, y, sc) { ctx.strokeStyle = '#3b2a22'; ctx.lineWidth = 3 * sc; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + 2 * sc, y - 12 * sc, x + 9 * sc, y - 14 * sc); ctx.stroke(); }
   function sweat(x, y, sc) { ctx.fillStyle = '#8fd6ff'; ctx.strokeStyle = '#3b6b8c'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x, y - 6 * sc); ctx.quadraticCurveTo(x + 5 * sc, y + 2 * sc, x, y + 4 * sc); ctx.quadraticCurveTo(x - 5 * sc, y + 2 * sc, x, y - 6 * sc); ctx.fill(); ctx.stroke(); }
-  /** 친구 그리기: (x, y) = 발 위치(아래 가운데). worry = 흔들릴 때 걱정 표정 */
-  function drawFriend(f, x, y, sc, rot, alpha, worry, lvl) {
+  /** 친구 그리기: (x, y) = 발 위치(아래 가운데). mood 0 태평 · 1 땀 · 2 걱정 · 3 질겁 */
+  function drawFriend(f, x, y, sc, rot, alpha, mood, lvl) {
+    mood = mood || 0; var worry = mood >= 2;
     var K = KIND[f.kind], L = LOOK[f.kind], w = L.w * C * sc, h = K.h * C * sc, sq = f.sq || 0;
     var sy = 1 - 0.22 * Math.sin(sq * Math.PI) * sq, sx = 1 + 0.18 * Math.sin(sq * Math.PI) * sq;
     ctx.save();
@@ -551,7 +586,7 @@ function simulate(cols0, buckets, kinds) {
       ctx.fillStyle = '#ffc48a'; ctx.beginPath(); ctx.ellipse(-R * 0.3, -R * 0.4, R * 0.35, R * 0.2, -0.5, 0, Math.PI * 2); ctx.fill();
       eyes(R * 0.12, -R * 0.08, R * 0.32, R * 0.24, null, worry);
       tuft(0, -R - 4, sc);
-      if (worry) sweat(R * 0.8, -R * 0.5, sc);
+      if (mood >= 1) sweat(R * 0.8, -R * 0.5, sc);
     } else if (f.kind === 'gil') {
       ctx.fillStyle = ol; rr(-w / 2 - 2.5, -h / 2 - 2.5, w + 5, h + 5, w / 2 + 2.5); ctx.fill();
       ctx.fillStyle = L.col; rr(-w / 2, -h / 2, w, h, w / 2); ctx.fill();
@@ -560,7 +595,7 @@ function simulate(cols0, buckets, kinds) {
       ctx.fillStyle = '#c5f08f'; rr(-w * 0.32, -h / 2 + 6 * sc, w * 0.22, h * 0.25, w * 0.1); ctx.fill();
       eyes(w * 0.08, -h / 2 + w * 0.62, w * 0.24, w * 0.17, L.col, worry);
       tuft(0, -h / 2 - 2, sc);
-      if (worry) sweat(w * 0.55, -h / 2 + w * 0.4, sc);
+      if (mood >= 1) sweat(w * 0.55, -h / 2 + w * 0.4, sc);
     } else if (f.kind === 'kwang') {
       ctx.fillStyle = ol; rr(-w / 2 - 2.5, -h / 2 - 2.5, w + 5, h + 5, 12 * sc); ctx.fill();
       ctx.fillStyle = L.col; rr(-w / 2, -h / 2, w, h, 10 * sc); ctx.fill();
@@ -569,7 +604,7 @@ function simulate(cols0, buckets, kinds) {
       eyes(w * 0.06, -h * 0.02, w * 0.15, h * 0.15, L.col, worry);
       if (!worry) { ctx.fillStyle = '#6fae5a'; ctx.strokeStyle = '#3b6b2c'; ctx.lineWidth = 1.5; [-1, 1].forEach(function (sd) { rr(w * 0.06 + sd * w * 0.15 - w * 0.1, -h * 0.34, w * 0.2, h * 0.1, 3); ctx.fill(); ctx.stroke(); }); }
       tuft(0, -h / 2 - 2, sc);
-      if (worry) sweat(w * 0.45, -h * 0.3, sc);
+      if (mood >= 1) sweat(w * 0.45, -h * 0.3, sc);
     } else {   // 부풀: 높이 올라갈수록 겁에 질려 부풂
       var Rp = Math.min(w, h) / 2 * (1 + (lvl || 0) * 0.08);
       ctx.fillStyle = ol;
@@ -583,23 +618,46 @@ function simulate(cols0, buckets, kinds) {
     }
     ctx.restore();
   }
-  function drawCell(x, y, m, top, shake) {
-    var j = shake ? Math.sin(G.t * 55 + x * 0.3 + y) * 2.6 : 0;
+  var CRACKS = [[[0.2, 0.15], [0.42, 0.42], [0.3, 0.62]], [[0.85, 0.2], [0.6, 0.48], [0.72, 0.78]], [[0.5, 0.08], [0.55, 0.35], [0.4, 0.55], [0.48, 0.9]]];
+  /** 블록: cell = { m, hp }. use = 이번 미리보기에서 깎일 양(깨지면 덜덜 떪) */
+  function drawCell(x, y, cell, top, use) {
+    var m = cell.m, max = RULE.HP[m], lost = max - cell.hp, breaks = use >= cell.hp;
+    var j = breaks ? Math.sin(G.t * 55 + x * 0.3 + y) * 2.6 : 0;
     x += j;
     if (m === 'W') {
       ctx.fillStyle = '#7a4b22'; rr(x + 1, y + 1, C - 2, C - 2, 5); ctx.fill();
-      ctx.fillStyle = shake ? '#dc9d5e' : '#c98a4b'; rr(x + 3, y + 3, C - 6, C - 6, 4); ctx.fill();
+      ctx.fillStyle = breaks ? '#dc9d5e' : '#c98a4b'; rr(x + 3, y + 3, C - 6, C - 6, 4); ctx.fill();
       ctx.strokeStyle = '#a96e35'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x + 7, y + 15); ctx.quadraticCurveTo(x + C / 2, y + 11, x + C - 7, y + 16); ctx.moveTo(x + 7, y + 29); ctx.quadraticCurveTo(x + C / 2, y + 33, x + C - 7, y + 28); ctx.stroke();
       ctx.fillStyle = '#5a3417'; [[7, 7], [C - 7, 7], [7, C - 7], [C - 7, C - 7]].forEach(function (p) { ctx.beginPath(); ctx.arc(x + p[0], y + p[1], 1.8, 0, Math.PI * 2); ctx.fill(); });
       if (top) { ctx.fillStyle = '#e8b47a'; rr(x + 3, y + 3, C - 6, 6, 3); ctx.fill(); }
     } else {
       ctx.fillStyle = '#4f5862'; rr(x + 1, y + 1, C - 2, C - 2, 7); ctx.fill();
-      ctx.fillStyle = shake ? '#b3bcc6' : '#9aa3ad'; rr(x + 3, y + 3, C - 6, C - 6, 6); ctx.fill();
+      ctx.fillStyle = breaks ? '#b3bcc6' : '#9aa3ad'; rr(x + 3, y + 3, C - 6, C - 6, 6); ctx.fill();
       ctx.fillStyle = '#b9c1c9'; rr(x + 6, y + 8, C * 0.4, C * 0.22, 4); ctx.fill();
-      ctx.strokeStyle = '#6f7983'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x + C * 0.62, y + C * 0.35); ctx.lineTo(x + C * 0.75, y + C * 0.55); ctx.lineTo(x + C * 0.68, y + C * 0.72); ctx.stroke();
       if (top) { ctx.fillStyle = '#6fae5a'; ctx.beginPath(); ctx.ellipse(x + C * 0.3, y + 5, 9, 4, 0, 0, Math.PI * 2); ctx.ellipse(x + C * 0.66, y + 4, 7, 3.5, 0, 0, Math.PI * 2); ctx.fill(); }
     }
-    if (shake) { ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); rr(x + 2, y + 2, C - 4, C - 4, 6); ctx.stroke(); ctx.setLineDash([]); }
+    // 금: 깎인 만큼 (미리보기로 더 깎일 금은 깜박임)
+    var showLost = Math.min(max, lost + (breaks ? 0 : use));
+    for (var k = 0; k < showLost; k++) {
+      var pts = CRACKS[k % 3], future = k >= lost;
+      ctx.strokeStyle = future ? 'rgba(220,40,30,' + (0.45 + 0.45 * Math.sin(G.t * 10)) + ')' : (m === 'S' ? '#3d454e' : '#4a2a10');
+      ctx.lineWidth = 2.6; ctx.lineJoin = 'round'; ctx.beginPath();
+      pts.forEach(function (p, q) { var px = x + p[0] * C, py = y + p[1] * C; if (q) ctx.lineTo(px, py); else ctx.moveTo(px, py); });
+      ctx.stroke();
+    }
+    // 체력 눈금: 깎였거나 이번에 맞을 블록만 (꽉 찬 점 = 남은 체력, 빨간 깜박임 = 이번에 깎일 몫)
+    if (lost > 0 || use > 0) {
+      var r = 3.6, gap = 9.5, sx = x + C / 2 - (max - 1) * gap / 2, py2 = y + C - 9;
+      ctx.fillStyle = 'rgba(40,25,15,0.55)'; rr(sx - 7, py2 - 6, (max - 1) * gap + 14, 12, 6); ctx.fill();
+      for (var q = 0; q < max; q++) {
+        var alive = q < cell.hp, willGo = alive && q >= cell.hp - use;
+        ctx.beginPath(); ctx.arc(sx + q * gap, py2, r, 0, Math.PI * 2);
+        ctx.fillStyle = !alive ? 'rgba(255,255,255,0.15)' : willGo ? 'rgba(255,80,60,' + (0.5 + 0.5 * Math.sin(G.t * 10)) + ')' : '#ffffff';
+        ctx.fill();
+      }
+    }
+    if (breaks) { ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); rr(x + 2, y + 2, C - 4, C - 4, 6); ctx.stroke(); ctx.setLineDash([]); }
+    if (cell.flash) { ctx.fillStyle = 'rgba(255,255,255,' + cell.flash * 1.6 + ')'; rr(x + 2, y + 2, C - 4, C - 4, 6); ctx.fill(); }
   }
   function drawMole(x, y, shake) {
     if (shake) x += Math.sin(G.t * 50 + x) * 2.2;
@@ -612,13 +670,12 @@ function simulate(cols0, buckets, kinds) {
     ctx.fillStyle = '#ffd23f'; ctx.beginPath(); ctx.arc(0, -11, 3.5, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
-  function drawKing(shakeCount) {
+  function drawKing(flyCount, dentPrev) {
     var x = KING_X(), base = groundY, ko = G.ko ? Math.min(1, G.koT / 0.6) : 0;
     ctx.save();
     ctx.translate(x, base);
     if (ko) { ctx.rotate(-ko * 1.3); ctx.translate(ko * 30, ko * 10); }
-    if (G.king > 0) ctx.translate(Math.sin(G.t * 70) * G.king * 6, 0);
-    // 큰 왕두더지 (2칸 너비)
+    if (G.king2 > 0) ctx.translate(Math.sin(G.t * 70) * G.king2 * 6, 0);
     ctx.fillStyle = '#3b2a22'; ctx.beginPath(); ctx.ellipse(0, -32, 42, 34, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#7a5a43'; ctx.beginPath(); ctx.ellipse(0, -32, 39, 31, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#e8c7a6'; ctx.beginPath(); ctx.ellipse(-6, -18, 18, 12, 0, 0, Math.PI * 2); ctx.fill();
@@ -626,29 +683,33 @@ function simulate(cols0, buckets, kinds) {
     if (ko) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; [-18, 6].forEach(function (ex) { ctx.beginPath(); ctx.moveTo(ex - 6, -46); ctx.lineTo(ex + 6, -36); ctx.moveTo(ex + 6, -46); ctx.lineTo(ex - 6, -36); ctx.stroke(); }); }
     else { ctx.fillStyle = '#1d1512'; rr(-30, -48, 22, 12, 4); ctx.fill(); rr(-4, -48, 22, 12, 4); ctx.fill(); ctx.fillRect(-9, -45, 6, 2.5); }
     ctx.strokeStyle = '#3b2a22'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-18, -8); ctx.lineTo(4, -10); ctx.stroke();
-    for (var k = 0; k < G.buckets; k++) {
-      var y = -73 - k * 13, sh = k >= G.buckets - shakeCount ? Math.sin(G.t * 50 + k) * 2.8 : 0;
+    var n = G.king.buckets;
+    for (var k = 0; k < n; k++) {
+      var y = -73 - k * 13, isTop = k === n - 1, sh = k >= n - flyCount ? Math.sin(G.t * 50 + k) * 2.8 : 0;
+      var dent = isTop ? G.king.dmg : 0;
       ctx.fillStyle = '#4f5862';
       ctx.beginPath(); ctx.moveTo(-22 + sh, y + 13); ctx.lineTo(22 + sh, y + 13); ctx.lineTo(17 + sh, y); ctx.lineTo(-17 + sh, y); ctx.closePath(); ctx.fill();
       ctx.fillStyle = sh ? '#fff3b0' : (k % 2 ? '#c9d1d9' : '#dfe5ea');
       ctx.beginPath(); ctx.moveTo(-20 + sh, y + 11.5); ctx.lineTo(20 + sh, y + 11.5); ctx.lineTo(15.5 + sh, y + 1.5); ctx.lineTo(-15.5 + sh, y + 1.5); ctx.closePath(); ctx.fill();
+      for (var dd = 0; dd < dent; dd++) { ctx.strokeStyle = '#4f5862'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(-8 + dd * 12 + sh, y + 5, 3.5, 0.2, Math.PI - 0.2); ctx.stroke(); }
     }
     ctx.restore();
+    // 맨 위 양동이 체력 눈금 (찌그러졌거나 이번에 맞을 때)
+    if (n > 0 && !ko && (G.king.dmg > 0 || dentPrev > 0)) {
+      var hp = RULE.BUCKET_HP - G.king.dmg, gap = 10, sx = x - gap, py = base - 73 - (n - 1) * 13 - 12;
+      ctx.fillStyle = 'rgba(40,25,15,0.6)'; rr(sx - 8, py - 6, 2 * gap + 16, 12, 6); ctx.fill();
+      for (var q = 0; q < RULE.BUCKET_HP; q++) {
+        var alive = q < hp, willGo = alive && q >= hp - dentPrev;
+        ctx.beginPath(); ctx.arc(sx + q * gap, py, 3.8, 0, Math.PI * 2);
+        ctx.fillStyle = !alive ? 'rgba(255,255,255,0.15)' : willGo ? 'rgba(255,80,60,' + (0.5 + 0.5 * Math.sin(G.t * 10)) + ')' : '#ffffff';
+        ctx.fill();
+      }
+    }
   }
   function drawBucket(x, y, r) {
     ctx.save(); ctx.translate(x, y); ctx.rotate(r);
     ctx.fillStyle = '#4f5862'; ctx.beginPath(); ctx.moveTo(-20, 6); ctx.lineTo(20, 6); ctx.lineTo(15, -6); ctx.lineTo(-15, -6); ctx.closePath(); ctx.fill();
     ctx.fillStyle = '#dfe5ea'; ctx.beginPath(); ctx.moveTo(-18, 4.5); ctx.lineTo(18, 4.5); ctx.lineTo(13.5, -4.5); ctx.lineTo(-13.5, -4.5); ctx.closePath(); ctx.fill();
-    ctx.restore();
-  }
-  function iconFace(kind, x, y, alpha, blocked) {
-    var L = LOOK[kind];
-    ctx.save(); ctx.globalAlpha = alpha;
-    ctx.fillStyle = '#3b2a22'; ctx.beginPath(); ctx.moveTo(x - 6, y + 9); ctx.lineTo(x + 6, y + 9); ctx.lineTo(x, y + 18); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.arc(x, y, 13.5, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = blocked ? '#ffe2d6' : '#fff'; ctx.beginPath(); ctx.arc(x, y, 12, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = L.col; ctx.beginPath(); ctx.arc(x, y, 9.5, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#2a1d17'; ctx.beginPath(); ctx.arc(x - 3, y - 1, 1.8, 0, Math.PI * 2); ctx.arc(x + 3, y - 1, 1.8, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
   function star(x, y, r) { ctx.beginPath(); for (var i = 0; i < 10; i++) { var a = -Math.PI / 2 + i * Math.PI / 5, r2 = i % 2 ? r * 0.45 : r; ctx.lineTo(x + Math.cos(a) * r2, y + Math.sin(a) * r2); } ctx.closePath(); ctx.fill(); }
@@ -680,17 +741,19 @@ function simulate(cols0, buckets, kinds) {
     var building = G.state === 'build' && G.tower.length && !G.tower.some(function (f) { return f.state === 'board'; });
     var sim = building ? currentSim() : null;
     var stab = G.tower.length ? stability(towerKinds()) : { R: 0, weak: -1 };
-    var breakFrom = G.cols.map(function (c, i) { return sim ? sim.cols[i].cells.length : 99; });
+    // 미리보기: 칸마다 이번에 깎일 양, 두더지, 양동이
+    var useMap = G.cols.map(function () { return {}; }), dentPrev = 0;
+    if (sim) sim.ev.forEach(function (ev) { ev.hits.forEach(function (h) { if (h.col >= RULE.KING) dentPrev += h.dent; else if (!h.miss) h.dmg.forEach(function (d) { useMap[h.col][d.idx] = (useMap[h.col][d.idx] || 0) + d.use; }); }); });
     var molePop = G.cols.map(function (c, i) { return sim ? (c.mole && !sim.cols[i].mole) : false; });
-    var bucketShake = sim ? G.buckets - sim.buckets : 0;
+    var flyCount = sim ? G.king.buckets - sim.king.buckets : 0;
 
     // 요새
     for (var c = 0; c < RULE.KING; c++) {
       var col = G.cols[c], x0 = pivotX + c * C;
-      for (var k = 0; k < col.cells.length; k++) drawCell(x0, groundY - (k + 1) * C, col.cells[k], k === col.cells.length - 1, k >= breakFrom[c]);
+      for (var k = 0; k < col.cells.length; k++) drawCell(x0, groundY - (k + 1) * C, col.cells[k], k === col.cells.length - 1, useMap[c][k] || 0);
       if (col.mole) drawMole(colX(c), colTop(c) - 14, molePop[c]);
     }
-    drawKing(bucketShake);
+    drawKing(flyCount, Math.min(dentPrev, RULE.BUCKET_HP - G.king.dmg));
 
     // 미리보기 원호: 친구마다 떨어지는 길 (벽에 걸리면 거기서 끝)
     if (sim) {
@@ -706,7 +769,7 @@ function simulate(cols0, buckets, kinds) {
     // 탑 (기울기 + 흔들림)
     if (G.tower.length) {
       var sway = 0;
-      if (G.state === 'build') sway = stab.R >= 0.35 ? Math.sin(G.t * (3 + stab.R * 4)) * Math.pow(stab.R, 2) * 4 : 0;
+      if (G.state === 'build') sway = G.sway + (stab.R >= 0.45 ? Math.sin(G.t * (3 + stab.R * 4)) * Math.pow(stab.R, 2) * 5 : 0);
       if (G.state === 'teeter') sway = Math.sin(G.t * 14) * (4 + G.tt * 14);
       ctx.save();
       ctx.translate(pivotX, groundY); ctx.rotate(G.angle * Math.PI / 180); ctx.translate(-pivotX, -groundY);
@@ -717,7 +780,7 @@ function simulate(cols0, buckets, kinds) {
         var sl = towerSlot(i), extra = (weakJ >= 0 && i >= weakJ) ? sway * 0.8 * (i - weakJ + 1) : 0;
         ctx.save();
         if (extra) { ctx.translate(sl.x, towerSlot(weakJ).y); ctx.rotate(extra * Math.PI / 180); ctx.translate(-sl.x, -towerSlot(weakJ).y); }
-        drawFriend(f, sl.x, sl.y, 1, 0, 1, stab.R >= 0.8 || G.state === 'teeter', i);
+        drawFriend(f, sl.x, sl.y, 1, 0, 1, G.state === 'teeter' ? 3 : moodOf(stab.R), i);
         ctx.restore();
         if (i === weakJ && i > 0) { ctx.strokeStyle = 'rgba(230,60,40,' + (0.5 + 0.5 * Math.sin(G.t * 12)) + ')'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(sl.x - 22, sl.y); ctx.lineTo(sl.x + 22, sl.y); ctx.stroke(); }
       });
@@ -725,7 +788,7 @@ function simulate(cols0, buckets, kinds) {
       G.tower.forEach(function (f, i) {
         if (f.state !== 'board') return;
         var sl = towerSlot(i), k2 = Math.min(1, f.bk);
-        drawFriend(f, f.fx0 + (sl.x - f.fx0) * k2, f.fy0 + (sl.y - f.fy0) * k2 - Math.sin(Math.PI * k2) * 60, 0.74 + 0.26 * k2, 0, 1, false, i);
+        drawFriend(f, f.fx0 + (sl.x - f.fx0) * k2, f.fy0 + (sl.y - f.fy0) * k2 - Math.sin(Math.PI * k2) * 60, 0.74 + 0.26 * k2, 0, 1, 0, i);
       });
     }
     // 흔들림 게이지 (탑 왼쪽, 초록 → 노랑 → 빨강)
@@ -737,43 +800,51 @@ function simulate(cols0, buckets, kinds) {
       ctx.strokeStyle = '#3b2a22'; ctx.lineWidth = 1.5; rr(gx - 2, gy1 - gh - 2, 12, gh + 4, 6); ctx.stroke();
     }
     // 무너진 친구들
-    if (G.falling) G.falling.forEach(function (p) { drawFriend(p.f, p.x, p.y + KIND[p.f.kind].h * C / 2, 1, p.r, Math.max(0, 1 - Math.max(0, G.collapseT - 0.8) * 2), true, 0); });
+    if (G.falling) G.falling.forEach(function (p) { drawFriend(p.f, p.x, p.y + KIND[p.f.kind].h * C / 2, 1, p.r, Math.max(0, 1 - Math.max(0, G.collapseT - 0.8) * 2), 3, 0); });
     // 날아가는/내려앉은 친구
-    if (G.flying) G.flying.forEach(function (fl) { drawFriend(fl.f, fl.f.x, fl.f.y + KIND[fl.f.kind].h * C / 2, 1, fl.rot || 0, fl.alpha == null ? 1 : fl.alpha, false, fl.ev.i); });
+    if (G.flying) G.flying.forEach(function (fl) { drawFriend(fl.f, fl.f.x, fl.f.y + KIND[fl.f.kind].h * C / 2, 1, fl.rot || 0, fl.alpha == null ? 1 : fl.alpha, 0, fl.ev.i); });
 
-    // 언덕 친구
+    // 언덕 친구: 표정이 "지금 내가 올라가면 위험한지"를 미리 보여 줌 (태평 · 땀 · 걱정 · 질겁)
+    var risk = G.state === 'build' ? hillRisk() : {};
     G.friends.forEach(function (f, i) {
       if (f.state === 'hill') {
-        var bob = Math.sin(G.t * 3 + f.bob) * 1.5;
+        var md = G.tower.length ? moodOf(risk[f.kind] || 0) : 0;
+        var bob = Math.sin(G.t * 3 + f.bob) * 1.5, tremble = md >= 3 ? Math.sin(G.t * 60 + i) * 2.2 : md >= 2 ? Math.sin(G.t * 40 + i) * 1 : 0;
+        if (md >= 3) { ctx.strokeStyle = 'rgba(230,60,40,' + (0.5 + 0.4 * Math.sin(G.t * 10)) + ')'; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(f.x, f.y + 2, LOOK[f.kind].w * C * 0.46, 7, 0, 0, Math.PI * 2); ctx.stroke(); }
         ctx.fillStyle = 'rgba(40,80,30,0.25)'; ctx.beginPath(); ctx.ellipse(f.x, f.y + 2, LOOK[f.kind].w * C * 0.4, 5, 0, 0, Math.PI * 2); ctx.fill();
-        drawFriend(f, f.x, f.y + bob, 0.74, 0, 1, false, 0);
+        drawFriend(f, f.x + tremble, f.y + bob, 0.74, 0, 1, md, 0);
       } else if (f.state === 'unboard') {
         var k3 = Math.min(1, f.bk);
-        drawFriend(f, f.fx0 + (f.hx - f.fx0) * k3, f.fy0 + (f.hy - f.fy0) * k3 - Math.sin(Math.PI * k3) * 50, 1 - 0.26 * k3, 0, 1, false, 0);
+        drawFriend(f, f.fx0 + (f.hx - f.fx0) * k3, f.fy0 + (f.hy - f.fy0) * k3 - Math.sin(Math.PI * k3) * 50, 1 - 0.26 * k3, 0, 1, 0, 0);
       } else {
         ctx.fillStyle = 'rgba(40,80,30,0.18)'; ctx.beginPath(); ctx.ellipse(f.hx, f.hy + 2, 12, 4, 0, 0, Math.PI * 2); ctx.fill();
       }
     });
 
-    // 미리보기 아이콘
+    // 미리보기: 떨어질 자리에 반투명 친구 그림자 (길쭉은 누운 모습, 부풀은 폭발 범위)
     if (sim) {
-      var stack = {};
+      var stackH = {};
       sim.ev.forEach(function (ev) {
-        var useful = ev.hits.some(function (h) { return h.broke.length || h.mole || h.bucket; });
-        var cc2 = Math.min(ev.land, RULE.KING_END + 1);
-        var x = ev.land >= RULE.KING && ev.land <= RULE.KING_END ? KING_X() : ev.land > RULE.KING_END ? ox + 380 : colX(ev.land);
-        var key = ev.land >= RULE.KING ? 'K' : ev.land;
-        var baseTop = ev.land >= RULE.KING ? kingTopY() - 6 : colTop(ev.land) - (G.cols[ev.land] && G.cols[ev.land].mole ? 30 : 4);
-        stack[key] = (stack[key] || 0) + 1;
-        if (ev.kind === 'puff' && ev.span) { ctx.save(); ctx.strokeStyle = 'rgba(255,93,93,0.8)'; ctx.fillStyle = 'rgba(255,93,93,0.12)'; ctx.lineWidth = 2; ctx.setLineDash([5, 5]); var rr2 = (ev.span[1] - ev.span[0] + 1) * C / 2; ctx.beginPath(); ctx.arc(colX(ev.land), colTop(Math.min(ev.land, RULE.KING - 1)) - 10, rr2, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore(); }
-        if (ev.kind === 'gil' && ev.span) {
-          var a = Math.max(0, ev.span[0]), b = Math.min(RULE.KING_END, ev.span[1]), top = groundY;
-          for (var q = a; q <= b; q++) top = Math.min(top, colTop(Math.min(q, RULE.KING)));
-          ctx.fillStyle = 'rgba(143,209,79,0.45)'; ctx.strokeStyle = 'rgba(79,154,36,0.9)'; ctx.lineWidth = 2;
-          rr(pivotX + a * C + 4, top - 40, (b - a + 1) * C - 8, 10, 5); ctx.fill(); ctx.stroke();
+        var useful = ev.hits.some(function (h) { return h.dmg.length || h.dent || h.mole; });
+        var K = KIND[ev.kind], L = LOOK[ev.kind], a = useful ? 0.55 : 0.22, ghost = { kind: ev.kind, sq: 0 };
+        var bob = Math.sin(G.t * 4 + ev.i) * 2;
+        if (ev.kind === 'gil') {
+          var s0 = Math.max(0, ev.span[0]), s1 = Math.min(RULE.KING_END, ev.span[1]), topG = groundY;
+          for (var q = s0; q <= s1; q++) topG = Math.min(topG, colTop(Math.min(q, RULE.KING)) - (q < RULE.KING && G.cols[q].mole ? 26 : 0));
+          var keyG = 'g' + s0, off = stackH[keyG] || 0, cxg = pivotX + (s0 + s1 + 1) / 2 * C;
+          ctx.save(); ctx.globalAlpha = a * 0.6; ctx.fillStyle = '#ffffff'; rr(pivotX + s0 * C + 3, topG - off - L.w * C - 4, (s1 - s0 + 1) * C - 6, L.w * C + 6, 14); ctx.fill(); ctx.restore();
+          drawFriend(ghost, cxg, topG - off - L.w * C / 2 + K.h * C / 2 - 2 + bob, 1, Math.PI / 2, a, 0, ev.i);
+          for (var q2 = s0; q2 <= s1; q2++) stackH[q2 >= RULE.KING ? 'K' : q2] = (stackH[q2 >= RULE.KING ? 'K' : q2] || 0) + L.w * C + 4;
+          return;
         }
-        var bounce = Math.sin(G.t * 5 + ev.i) * 2;
-        iconFace(ev.kind, x, baseTop - 24 - (stack[key] - 1) * 30 + bounce, useful ? 1 : 0.45, ev.blocked);
+        var key = ev.land >= RULE.KING && ev.land <= RULE.KING_END ? 'K' : ev.land;
+        var x = key === 'K' ? KING_X() : ev.land > RULE.KING_END ? ox + 372 : colX(ev.land);
+        var top = key === 'K' ? kingTopY() - 4 : ev.land > RULE.KING_END ? groundY : colTop(ev.land) - (G.cols[ev.land].mole ? 28 : 2);
+        var off2 = stackH[key] || 0;
+        if (ev.kind === 'puff' && ev.span) { ctx.save(); ctx.strokeStyle = 'rgba(255,93,93,0.85)'; ctx.fillStyle = 'rgba(255,93,93,0.12)'; ctx.lineWidth = 2; ctx.setLineDash([5, 5]); var rr2 = (ev.span[1] - ev.span[0] + 1) * C / 2; ctx.beginPath(); ctx.arc(colX(ev.land), colTop(Math.min(ev.land, RULE.KING - 1)) - 10, rr2, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore(); }
+        ctx.save(); ctx.globalAlpha = a * 0.6; ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(x, top - off2 - K.h * C / 2, L.w * C * 0.62, K.h * C * 0.6, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        drawFriend(ghost, x, top - off2 + bob, 1, 0, a, 0, ev.i);
+        stackH[key] = off2 + K.h * C + 4;
       });
     }
 
@@ -869,13 +940,15 @@ function simulate(cols0, buckets, kinds) {
   function toClient(x, y) { var r = cv.getBoundingClientRect(); return { x: r.left + x * s, y: r.top + y * s }; }
   window.mongle = {
     snapshot: function () {
-      var kinds = towerKinds(), sim = kinds.length ? simulate(G.cols, G.buckets, kinds) : null, st = kinds.length ? stability(kinds) : null;
+      var kinds = towerKinds(), sim = kinds.length ? simulate(G.cols, G.king, kinds) : null, st = kinds.length ? stability(kinds) : null;
+      var colStr = function (cols) { return cols.map(function (c) { return { cells: c.cells.map(function (x) { return x.m + x.hp; }).join(''), mole: c.mole }; }); };
       return JSON.parse(JSON.stringify({
-        state: G.state, score: G.score, buckets: G.buckets, angle: G.angle, left: friendsLeft(),
+        state: G.state, score: G.score, buckets: G.king.buckets, kingDmg: G.king.dmg, angle: G.angle, left: friendsLeft(),
+        risk: G.state === 'build' && G.tower.length ? hillRisk() : null,
         tower: kinds, stab: st ? { R: +st.R.toFixed(3), weak: st.weak } : null,
-        cols: G.cols.map(function (c) { return { cells: c.cells.join(''), mole: c.mole }; }),
-        preview: sim ? sim.ev.map(function (e) { return { kind: e.kind, land: e.land, blocked: e.blocked, hits: e.hits.map(function (h) { return { col: h.col, broke: h.broke.length, bucket: h.bucket || 0, ding: h.ding, clang: h.clang, miss: h.miss }; }) }; }) : [],
-        previewAfter: sim ? { cols: sim.cols.map(function (c) { return { cells: c.cells.join(''), mole: c.mole }; }), buckets: sim.buckets } : null,
+        cols: colStr(G.cols),
+        preview: sim ? sim.ev.map(function (e) { return { kind: e.kind, land: e.land, blocked: e.blocked, power: e.power, hits: e.hits.map(function (h) { return { col: h.col, dmg: h.dmg.reduce(function (a, d) { return a + d.use; }, 0), broke: h.broke.length, bucket: h.bucket || 0, dent: h.dent, miss: h.miss }; }) }; }) : [],
+        previewAfter: sim ? { cols: colStr(sim.cols), buckets: sim.king.buckets, kingDmg: sim.king.dmg } : null,
         hill: G.friends.filter(function (f) { return f.state === 'hill'; }).map(function (f) { var b = body(f, 0.74), p = toClient(b.cx, b.cy); return { id: f.id, kind: f.kind, sx: Math.round(p.x), sy: Math.round(p.y) }; }),
         towerTop: kinds.length ? (function () { var i = kinds.length - 1, sl = towerSlot(i), p = toClient(sl.x, sl.y - KIND[kinds[i]].h * C / 2); return { sx: Math.round(p.x), sy: Math.round(p.y) }; })() : null,
         towerBase: (function () { var p = toClient(towerX, groundY - C * 0.5); return { sx: Math.round(p.x), sy: Math.round(p.y) }; })(),
