@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /*
- * 몽글탑 판 계산기 — tower.html 의 규칙 블록을 그대로 꺼내 쓴다 (목업과 항상 같은 규칙).
+ * 몽글탑 판 계산기 — tower-v03.html(v0.3) 의 규칙 블록을 그대로 꺼내 쓴다 (목업과 항상 같은 규칙).
  * 가설: 판 하나가 "막 쌓으면 무너지고, 생각해서 쌓으면 깬다"인지는 감으로 맞출 수 없으니 전수 탐색으로 확인한다.
  * 실행: node moakung-v3/tools/solve.js
  *   - 최선 풀이(남는 친구 최대), 안전 루트(흔들림 빨강 0.8 미만만), 탑 높이별 무너짐 비율, 첫 밀기 선택지
  */
 'use strict';
 const fs = require('fs'), path = require('path'), vm = require('vm');
-const html = fs.readFileSync(path.join(__dirname, '..', 'tower.html'), 'utf8');
+const html = fs.readFileSync(path.join(__dirname, '..', 'tower-v03.html'), 'utf8');
 const R = {}; vm.createContext(R); vm.runInContext(html.match(/\/\*RULES-START\*\/([\s\S]*?)\/\*RULES-END\*\//)[1], R);
 const KINDS = ['kwang', 'gil', 'mong', 'puff'];
 const NAME = { kwang: '꽝돌', gil: '길쭉', mong: '몽이', puff: '부풀' };

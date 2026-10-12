@@ -16,5 +16,5 @@
 ## 2. 저장소 구조
 - `moakung/` — "모아쿵!" 1차 2D 프로토타입 (설치 없이 `index.html`을 열면 실행).
 - `moakung3d/` — 2차 물리 3D 데모 (three.js + cannon-es). 원점 재기획으로 보류.
-- `moakung-v3/` — 재기획 v0.1 손맛 비교 목업: `index.html`(고르기) → `tower.html`(몽글탑: 쌓고 밀기) / `circle.html`(빙글쿵: 원 그려 모아 쿵).
+- `moakung-v3/` — 재기획 손맛 비교 목업: `index.html`(고르기) → `tower.html`(몽글탑 v0.4: 진짜 물리 planck.js — 끌어 쌓고 스프링 당겨 튕!) / `circle.html`(빙글쿵: 원 그려 모아 쿵). `tower-v03.html`은 v0.3 보존, `tools/sim.js`는 v0.4 물리 계산기(게임과 같은 WORLD 블록), `vendor/`는 planck.js(MIT).
 - 새 프로젝트는 각자 별도 폴더에서 작업한다.
