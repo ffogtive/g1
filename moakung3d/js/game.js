@@ -64,6 +64,46 @@
   var hoverPt = null;
 
   function cakeCenter() { return { x: W.CAKE_X, z: W.CAKE_Z }; }
+
+  /*
+   * 닿는 바닥 지도: 붓 반경 안에 '조준이 아닌' 손가락 위치가 하나라도 있으면 그 칸의 재료는 주울 수 있다.
+   * 케이크 뒤처럼 화면상 가려진 곳에는 재료를 두지 않고, 굴러 들어가면 꺼낸다.
+   */
+  var reach = null, RCELL = 1;
+  function computeReach() {
+    var nx = Math.ceil(W.TW / RCELL), nz = Math.ceil(W.TD / RCELL);
+    var grid = new Uint8Array(nx * nz);
+    for (var iz = 0; iz < nz; iz++) for (var ix = 0; ix < nx; ix++) {
+      var x = -W.TW / 2 + (ix + 0.5) * RCELL, z = -W.TD / 2 + (iz + 0.5) * RCELL, ok = false;
+      if (!W.aimHitsFloor(x, z)) ok = true;
+      for (var r = 1; r <= BRUSH_R - 0.4 && !ok; r += 1) {
+        for (var k = 0; k < 12 && !ok; k++) {
+          var px = x + Math.cos((k / 12) * Math.PI * 2) * r, pz = z + Math.sin((k / 12) * Math.PI * 2) * r;
+          if (W.insideTray(px, pz, 0) && !W.aimHitsFloor(px, pz)) ok = true;
+        }
+      }
+      grid[ix + iz * nx] = ok ? 1 : 0;
+    }
+    reach = { nx: nx, nz: nz, grid: grid };
+  }
+  function reachable(x, z) {
+    if (!reach) return true;
+    var ix = Math.floor((x + W.TW / 2) / RCELL), iz = Math.floor((z + W.TD / 2) / RCELL);
+    if (ix < 0 || iz < 0 || ix >= reach.nx || iz >= reach.nz) return true;
+    return reach.grid[ix + iz * reach.nx] === 1;
+  }
+  function nearestReachable(x, z, minFromCake) {
+    for (var r = 0; r < 30; r += 0.7) {
+      for (var k = 0; k < 24; k++) {
+        var a = (k / 24) * Math.PI * 2;
+        var px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+        if (!W.insideTray(px, pz, 1.2)) continue;
+        if (minFromCake && Math.hypot(px - W.CAKE_X, pz - W.CAKE_Z) < minFromCake) continue;
+        if (reachable(px, pz)) return { x: px, z: pz };
+      }
+    }
+    return { x: 0, z: W.TD / 2 - 3 };
+  }
   function cakeR() { return W.cake ? W.cake.style.r * W.cake.scale : 7; }
 
   function layoutItems(lv, rand) {
@@ -73,7 +113,7 @@
     shuffle(heavy);
     shuffle(light);
     var cR = cakeR();
-    function free(x, z, pad) { return W.insideTray(x, z, 1.4) && Math.hypot(x - W.CAKE_X, z - W.CAKE_Z) > cR + (pad || 2.6); }
+    function free(x, z, pad) { return W.insideTray(x, z, 1.4) && Math.hypot(x - W.CAKE_X, z - W.CAKE_Z) > cR + (pad || 2.6) && reachable(x, z); }
     var nC = Math.max(4, Math.ceil((heavy.length + light.length) / 5));
     var centers = [], tries = 0;
     while (centers.length < nC && tries++ < 5000) {
@@ -128,6 +168,7 @@
     var rand = R.rng(lv.seed);
     var modelName = lv.model || (save.meshyAll ? 'strawberry' : null);
     W.buildCake(lv, 1, modelName ? MODELS[modelName] : null);
+    computeReach();
     var items = layoutItems(lv, rand);
     items.forEach(function (it) { W.makeItem(it); });
     for (var i = 0; i < 90; i++) W.world.step(1 / 60); // 재료가 바닥에 자리 잡게
@@ -294,6 +335,7 @@
       tx = cc.x + Math.cos(a) * minD;
       tz = cc.z + Math.sin(a) * minD;
     }
+    if (!reachable(tx, tz)) { var rp = nearestReachable(tx, tz, minD); tx = rp.x; tz = rp.z; }
     d.held.forEach(function (it) { it.state = 'clump'; it.att = null; });
     // 근처 덩어리가 있으면 합친다
     for (var i = 0; i < G.clumps.length; i++) {
@@ -480,7 +522,13 @@
       it.crossed = false;
     } else {
       W.addItemBody(it, p.x, p.y, p.z, false);
+      // 닿는 바닥 쪽으로 튀게 (케이크 뒤 가려진 곳 피하기)
       var aa = Math.atan2(p.z - cz, p.x - cx) + (r() - 0.5) * 1.2;
+      for (var tries = 0; tries < 16; tries++) {
+        var dist = cakeR() + 3 + r() * 5;
+        if (reachable(cx + Math.cos(aa) * dist, cz + Math.sin(aa) * dist)) break;
+        aa = r() * Math.PI * 2;
+      }
       var sp = 9 + r() * 7;
       it.body.velocity.set(Math.cos(aa) * sp, 6 + r() * 6, Math.sin(aa) * sp);
       it.target = new V3(p.x, 0, p.z);
@@ -520,8 +568,11 @@
           b.velocity.set(Math.cos(a) * 9, 4, Math.sin(a) * 9);
         }
         if ((it.flyT > 0.6 && speed < 0.8 && b.position.y < PICK_Y) || it.flyT > 3.2) {
-          it.state = 'floor';
-          S.land(R.MATERIALS[it.mat].sound);
+          if (nudgeIfHidden(it)) busy = true;
+          else {
+            it.state = 'floor';
+            S.land(R.MATERIALS[it.mat].sound);
+          }
         } else busy = true;
       } else if (it.state === 'fall') {
         busy = true;
@@ -539,9 +590,31 @@
     if (D.settle > 0.25 && D.t > 0.9) finishDrop();
   }
 
+  /** 닿지 않는 곳(케이크 뒤 등)에 멈춘 재료를 닿는 곳으로 굴려 보낸다 */
+  function nudgeIfHidden(it) {
+    var b = it.body;
+    if (!b || reachable(b.position.x, b.position.z) || (it.nudges || 0) >= 4) return false;
+    it.nudges = (it.nudges || 0) + 1;
+    var tgt = nearestReachable(b.position.x, b.position.z, cakeR() + 1.5);
+    var dx = tgt.x - b.position.x, dz = tgt.z - b.position.z, d = Math.hypot(dx, dz) || 1;
+    b.wakeUp();
+    b.velocity.set((dx / d) * Math.min(14, 5 + d * 2), 5, (dz / d) * Math.min(14, 5 + d * 2));
+    it.flyT = 0.2;
+    return true;
+  }
+  function sweepHidden() {
+    if (!G || G.drag || G.drop) return;
+    G.items.forEach(function (it) {
+      if (it.state !== 'floor' || !it.body) return;
+      var v = it.body.velocity;
+      if (v.x * v.x + v.y * v.y + v.z * v.z > 0.5) return;
+      if (nudgeIfHidden(it)) { it.state = 'fly'; it.lost = false; G.hiddenNudges = (G.hiddenNudges || 0) + 1; }
+    });
+  }
   function finishDrop() {
     G.drop = null;
     phase = 'play';
+    computeReach(); // 층이 줄면 가려지는 곳도 바뀐다
     checkEnd();
   }
 
@@ -680,6 +753,18 @@
       if (G.drop) updateDrop(dt);
       updateDropClump();
       if (phase === 'finale' && G.finale) updateFinale(dt);
+      if (phase === 'play') {
+        G.hidT = (G.hidT || 0) + dt;
+        if (G.hidT > 0.8) { G.hidT = 0; sweepHidden(); }
+        // 굴려 꺼내는 중인 재료가 멈추면 다시 바닥 상태로
+        G.items.forEach(function (it) {
+          if (it.state === 'fly' && !it.lost && !G.drop && it.body) {
+            it.flyT = (it.flyT || 0) + dt;
+            var v = it.body.velocity;
+            if ((it.flyT > 0.6 && v.x * v.x + v.y * v.y + v.z * v.z < 0.64) || it.flyT > 3) { if (!nudgeIfHidden(it)) it.state = 'floor'; }
+          }
+        });
+      }
       W.updateFx(dt);
       W.shake *= Math.exp(-dt * 8);
       updateBrush();
@@ -1127,6 +1212,7 @@
     var w = wrap.clientWidth, h = wrap.clientHeight;
     if (w < 10 || h < 10) return;
     W.resize(w, h);
+    if (G && W.cake) computeReach();
     hudCache = {};
   }
   window.addEventListener('resize', resize);
@@ -1155,7 +1241,8 @@
           return { n: cl.items.length, sx: Math.round(p.x), sy: Math.round(p.y) };
         }),
         cakeAim: { sx: Math.round(cp.x), sy: Math.round(cp.y) },
-        brushRadius: BRUSH_R, history: G.history, save: save
+        brushRadius: BRUSH_R, history: G.history, save: save,
+        hiddenItems: G.items.filter(function (it) { return (it.state === 'floor' || it.state === 'clump') && it.body && !reachable(it.body.position.x, it.body.position.z); }).length
       }));
     },
     /** 화면 좌표가 조준 영역인지, 바닥 어디인지 (읽기 전용) */

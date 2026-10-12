@@ -282,8 +282,9 @@ const SCENARIOS = {
   async drops(bot) {
     console.log('\n■ 낙하마다 재료 감소·HUD 일치 (레벨 4 단단한 케이크)');
     await bot.openLevel(3);
+    await bot.setLock(6); // 촘촘한 무더기에서도 딱 6개만 (넉넉한 붓 + 개수 맞춤)
     await bot.sweep({ until: sn => sn.held >= 6 });
-    const r = await dropCheck(bot, '작은 덩어리');
+    const r = await dropCheck(bot, '작은 덩어리 6개');
     check('단단한 케이크에 작은 덩어리는 흠집만', r.aim.preview.kind === 'scratch' && r.after.layers[0].hp > r.after.layers[0].maxHp * 0.6, `${r.after.layers[0].hp.toFixed(1)}/${r.after.layers[0].maxHp}`);
   },
 
@@ -330,8 +331,10 @@ const SCENARIOS = {
     console.log('\n■ 다시하기는 정확히 되돌린다 (레벨 1)');
     let s = await bot.openLevel(0);
     const layout = JSON.stringify(s.items.map(i => [i.id, Math.round(i.x), Math.round(i.z)]));
-    await bot.sweep({ until: sn => sn.held >= 4 });
-    await bot.moveTo(s.items[0].sx, s.items[0].sy);
+    const sw = await bot.sweep({ until: sn => sn.held >= 4 });
+    let safe = null;
+    for (const it of sw.items) if (!(await bot.probe(it.sx, it.sy)).aim) { safe = it; break; }
+    await bot.moveTo(safe.sx, safe.sy); // 케이크 밖에서 놓기
     await bot.release();
     await bot.wait(600);
     await bot.page.click('#btn-restart');

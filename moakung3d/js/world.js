@@ -501,9 +501,10 @@
           var m = new THREE.Mesh(geo, mat);
           m.castShadow = true;
           m.receiveShadow = true;
+          m.userData.own = true;
           var mid = (a0 + a1) / 2;
           // shape 의 (x, y) → 월드 (x, -z) 이므로 방향 보정
-          m.userData = { mid: mid, dir: new THREE.Vector3(Math.cos(mid), 0, -Math.sin(mid)), r: r, h: h, a0: a0, a1: a1 };
+          m.userData = { mid: mid, dir: new THREE.Vector3(Math.cos(mid), 0, -Math.sin(mid)), r: r, h: h, a0: a0, a1: a1, own: true };
           lg.add(m);
           wedges.push(m);
         }
@@ -519,13 +520,7 @@
       W.cake = { group: group, layers: layers, style: st, coat: null, aim: null, scale: s, topY: y };
       W.addToppings(W.cake, st.toppings);
       if (level.coat) W.addCoat(W.cake, level.coat);
-      // 조준 판정용 보이지 않는 원기둥 (넉넉하게)
-      var aimR = st.r * s + 3, aimH = y + 6;
-      var aim = new THREE.Mesh(new THREE.CylinderGeometry(aimR, aimR, aimH, 24), new THREE.MeshBasicMaterial({ visible: false }));
-      aim.position.set(CAKE_X, aimH / 2 - 0.5, CAKE_Z);
-      scene.add(aim);
-      W.cake.aim = aim;
-      W.cake.aimR = aimR;
+      makeAim(st.r * s, y);
       return W.cake;
     };
 
@@ -622,7 +617,7 @@
           m.castShadow = true;
           m.receiveShadow = true;
           var a0 = (kk / K) * Math.PI * 2, a1 = ((kk + 1) / K) * Math.PI * 2, mid = (a0 + a1) / 2;
-          m.userData = { mid: mid, dir: new THREE.Vector3(Math.cos(mid), 0, -Math.sin(mid)), r: R, h: slabH, a0: a0, a1: a1 };
+          m.userData = { mid: mid, dir: new THREE.Vector3(Math.cos(mid), 0, -Math.sin(mid)), r: R, h: slabH, a0: a0, a1: a1, own: true };
           lg.add(m);
           wedges.push(m);
         }
@@ -634,14 +629,58 @@
       }
       W.cake = { group: group, layers: layers, style: { r: R, layers: [styleLayer] }, coat: null, aim: null, scale: 1, topY: base + Ht, model: true };
       if (level.coat) W.addCoat(W.cake, level.coat);
-      var aimR = R + 3, aimH = base + Ht + 6;
-      var aim = new THREE.Mesh(new THREE.CylinderGeometry(aimR, aimR, aimH, 24), new THREE.MeshBasicMaterial({ visible: false }));
-      aim.position.set(CAKE_X, aimH / 2 - 0.5, CAKE_Z);
+      makeAim(R, base + Ht);
+      return W.cake;
+    }
+
+    /*
+     * 조준 판정용 보이지 않는 원기둥: 케이크 몸통 둘레 +2.2, 높이는 실제 윗면 +2.5.
+     * (너무 높으면 화면상 케이크 뒤 바닥까지 '조준'이 되어 그곳 재료를 못 줍는다)
+     */
+    var AIM_PAD = 2.2, AIM_TOP = 2.5;
+    function makeAim(R, topY) {
+      var aimR = R + AIM_PAD;
+      var aim = new THREE.Mesh(new THREE.CylinderGeometry(aimR, aimR, 1, 24), new THREE.MeshBasicMaterial({ visible: false }));
       scene.add(aim);
       W.cake.aim = aim;
       W.cake.aimR = aimR;
-      return W.cake;
+      W.setAimTop(topY);
     }
+    W.setAimTop = function (topY) {
+      var c = W.cake;
+      if (!c || !c.aim) return;
+      var h = Math.max(1, topY + AIM_TOP + 0.5);
+      c.aimH = h;
+      c.aim.scale.y = h;
+      c.aim.position.set(CAKE_X, h / 2 - 0.5, CAKE_Z);
+      c.aim.updateMatrixWorld();
+    };
+    /** 카메라에서 바닥점(x, 0.5, z)을 볼 때 조준 원기둥에 먼저 닿는가 (닿는 바닥 지도 계산용, 해석적) */
+    W.aimHitsFloor = function (x, z) {
+      var c = W.cake;
+      if (!c || !c.aim) return false;
+      var O = camBase, dx = x - O.x, dy = 0.5 - O.y, dz = z - O.z;
+      var ox = O.x - CAKE_X, oz = O.z - CAKE_Z, R = c.aimR, y0 = -0.5, y1 = c.aimH - 0.5;
+      // 윗면 뚜껑
+      var tc = (y1 - O.y) / dy;
+      if (tc > 0 && tc < 1) {
+        var px = ox + dx * tc, pz = oz + dz * tc;
+        if (px * px + pz * pz <= R * R) return true;
+      }
+      // 옆면
+      var A = dx * dx + dz * dz, B = 2 * (ox * dx + oz * dz), C = ox * ox + oz * oz - R * R;
+      var disc = B * B - 4 * A * C;
+      if (disc < 0 || A === 0) return false;
+      var sq = Math.sqrt(disc);
+      for (var k = 0; k < 2; k++) {
+        var t = (-B + (k ? sq : -sq)) / (2 * A);
+        if (t > 0 && t < 1) {
+          var yy = O.y + dy * t;
+          if (yy >= y0 && yy <= y1) return true;
+        }
+      }
+      return false;
+    };
 
     W.addToppings = function (cake, type) {
       var top = cake.layers[0];
@@ -721,12 +760,23 @@
       cake.coat = coat;
     };
 
+    function disposeTree(obj) {
+      obj.traverse(function (o) {
+        if (!o.isMesh) return;
+        if (o.userData.own || o.userData.disposable) o.geometry.dispose();
+        if (o.userData.disposableMat) o.material.dispose();
+      });
+    }
     W.disposeCake = function () {
       var c = W.cake;
       if (!c) return;
       c.layers.forEach(function (l) { if (l.body) world.removeBody(l.body); });
       scene.remove(c.group);
-      if (c.aim) scene.remove(c.aim);
+      disposeTree(c.group);
+      c.layers.forEach(function (l) {
+        if (!c.model && l.wedges[0]) l.wedges[0].material.dispose();
+      });
+      if (c.aim) { scene.remove(c.aim); c.aim.geometry.dispose(); }
       W.cake = null;
     };
 
@@ -765,7 +815,9 @@
         var wp = new THREE.Vector3();
         m.geometry.computeBoundingBox();
         m.geometry.boundingBox.getCenter(wp);
+        var old = m.geometry;
         m.geometry = m.geometry.clone();
+        old.dispose();
         m.geometry.translate(-wp.x, -wp.y, -wp.z);
         var worldPos = wp.clone().applyMatrix4(m.matrixWorld);
         var q = new THREE.Quaternion();
@@ -794,6 +846,7 @@
       var remain = W.cake.layers.filter(function (l) { return !l.broken; });
       var topY = remain.length ? remain[0].y0 + remain[0].h * remain[0].group.scale.y : 0.2;
       W.cake.topY = topY;
+      W.setAimTop(topY);
       if (!remain.length && W.cake.coat) W.popCoat();
     };
 
@@ -817,11 +870,13 @@
     };
 
     var crumbGeo = new THREE.BoxGeometry(0.5, 0.4, 0.5);
+    var crumbMats = {};
+    function crumbMat(c) { return crumbMats[c] || (crumbMats[c] = new THREE.MeshStandardMaterial({ color: c, roughness: 0.7 })); }
     W.crumbs = function (li, count, impact) {
       var L = W.cake.layers[li];
       var cols = [L.style.side, L.style.inside, L.style.top];
       for (var i = 0; i < count; i++) {
-        var m = new THREE.Mesh(crumbGeo, new THREE.MeshStandardMaterial({ color: cols[i % 3], roughness: 0.7 }));
+        var m = new THREE.Mesh(crumbGeo, crumbMat(cols[i % 3]));
         var s = 0.5 + Math.random() * 0.9;
         m.scale.set(s, s, s);
         m.castShadow = true;
@@ -940,7 +995,11 @@
         }
         if (k >= 1) {
           if (f.body) world.removeBody(f.body);
-          if (f.mesh && f.type !== 'squash' && f.type !== 'wobble') scene.remove(f.mesh);
+          if (f.mesh && f.type !== 'squash' && f.type !== 'wobble') {
+            scene.remove(f.mesh);
+            if (f.mesh.userData.own) f.mesh.geometry.dispose();
+            if (f.type === 'puff') f.mesh.material.dispose();
+          }
           W.fx.splice(i, 1);
         }
       }
@@ -953,7 +1012,11 @@
     W.clearFx = function () {
       W.fx.forEach(function (f) {
         if (f.body) world.removeBody(f.body);
-        if (f.mesh && f.type !== 'squash' && f.type !== 'wobble') scene.remove(f.mesh);
+        if (f.mesh && f.type !== 'squash' && f.type !== 'wobble') {
+          scene.remove(f.mesh);
+          if (f.mesh.userData.own) f.mesh.geometry.dispose();
+          if (f.type === 'puff') f.mesh.material.dispose();
+        }
       });
       W.fx = [];
     };
