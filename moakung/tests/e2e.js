@@ -441,6 +441,9 @@ const SCENARIOS = {
   }
 };
 
+module.exports = { Bot, URL, SHOTS, playOrder, economicalHit, dropAndLog, playwright };
+if (require.main !== module) return;
+
 (async () => {
   const pick = process.argv.slice(2);
   const names = pick.length ? pick : Object.keys(SCENARIOS);

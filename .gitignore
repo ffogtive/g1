@@ -1,3 +1,4 @@
 moakung/docs/screens/e2e-*.png
 node_modules/
 .DS_Store
+moakung/dist/
