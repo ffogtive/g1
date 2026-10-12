@@ -22,7 +22,7 @@
   /* ---------------- 저장 ---------------- */
   var SAVE_KEY = 'moakung3d.v1';
   function loadSave() {
-    var d = { unlocked: 1, best: {}, book: {}, sound: true, seenHelp: false, lock: null, lastLock: 10 };
+    var d = { unlocked: 1, best: {}, book: {}, sound: true, seenHelp: false, lock: null, lastLock: 10, meshyAll: false };
     try {
       var s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
       if (s) for (var k in d) if (s[k] !== undefined) d[k] = s[k];
@@ -54,6 +54,9 @@
     return v;
   }
   function clumpR(n) { return 0.6 * Math.cbrt(Math.max(1, n)) + 0.55; }
+
+  /* ---------------- 3D 모델 (Meshy) ---------------- */
+  var MODELS = {};
 
   /* ---------------- 상태 ---------------- */
   var G = null;
@@ -123,7 +126,8 @@
     clearLevel();
     var lv = R.LEVELS[idx];
     var rand = R.rng(lv.seed);
-    W.buildCake(lv, 1);
+    var modelName = lv.model || (save.meshyAll ? 'strawberry' : null);
+    W.buildCake(lv, 1, modelName ? MODELS[modelName] : null);
     var items = layoutItems(lv, rand);
     items.forEach(function (it) { W.makeItem(it); });
     for (var i = 0; i < 90; i++) W.world.step(1 / 60); // 재료가 바닥에 자리 잡게
@@ -903,7 +907,7 @@
     return s;
   }
   function miniCake(lv) {
-    var st = window.MKWorld.CAKES[lv.kind];
+    var st = window.MKWorld.CAKES[lv.model || (save.meshyAll && MODELS.strawberry) ? 'shortcake' : lv.kind];
     var n = lv.layers.length;
     var svg = '<svg class="mini" viewBox="0 0 60 52" aria-hidden="true">';
     svg += '<ellipse cx="30" cy="47" rx="27" ry="4" fill="#fff"/>';
@@ -934,7 +938,9 @@
         '<span class="ball"><span class="num">' + lv.id + '</span>' + miniCake(lv) + '</span>' +
         '<span class="name">' + lv.name + '</span><span class="stars">' + (best ? starsHtml(best.stars) : '') + '</span></button>';
     });
-    html += '</div><div class="btn-row"><button class="btn ghost" data-act="help">조작법</button><button class="btn ghost" data-act="book">도감</button></div>';
+    html += '</div>';
+    if (MODELS.strawberry) html += '<div class="btn-row"><button class="btn ghost" data-act="meshy" aria-pressed="' + !!save.meshyAll + '">' + (save.meshyAll ? '✓ ' : '') + '모든 레벨을 Meshy 케이크로</button></div>';
+    html += '<div class="btn-row"><button class="btn ghost" data-act="help">조작법</button><button class="btn ghost" data-act="book">도감</button></div>';
     showOverlay(html, 'map');
   }
 
@@ -1079,6 +1085,10 @@
       case 'help': return showHelp(phase);
       case 'book': return showBook();
       case 'close': return closeModal();
+      case 'meshy':
+        save.meshyAll = !save.meshyAll;
+        writeSave();
+        return showMap();
       case 'continue':
         G.ignoreImpossible = true;
         G.ended = false;
@@ -1157,8 +1167,11 @@
   };
 
   resize();
-  $('loading').remove();
-  newGame(Math.min(save.unlocked, R.LEVELS.length) - 1);
-  showMap();
-  requestAnimationFrame(frame);
+  W.loadModel('strawberry').then(function (m) {
+    if (m) MODELS.strawberry = m;
+    $('loading').remove();
+    newGame(Math.min(save.unlocked, R.LEVELS.length) - 1);
+    showMap();
+    requestAnimationFrame(frame);
+  });
 })();

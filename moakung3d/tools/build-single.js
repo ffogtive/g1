@@ -15,7 +15,7 @@ const cdn = args.includes('--cdn');
 const out = args.find(a => !a.startsWith('--')) || path.join(ROOT, 'dist', 'moakung3d.html');
 
 let html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-html = html.replace(/<script src="((?:js|vendor)\/[^"]+)"><\/script>/g, (m, src) => {
+html = html.replace(/<script src="((?:js|vendor|assets)\/[^"]+)"><\/script>/g, (m, src) => {
   if (cdn && src === 'vendor/three.min.js') return '<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>';
   const code = fs.readFileSync(path.join(ROOT, src), 'utf8');
   return '<script>\n/* ' + src + ' */\n' + code.replace(/<\/script/gi, '<\\/script') + '\n</script>';

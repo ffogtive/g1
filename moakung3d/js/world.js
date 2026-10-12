@@ -463,8 +463,9 @@
 
     /* --- 케이크 --- */
     // level.layers 는 위층부터. 아래층부터 쌓는다.
-    W.buildCake = function (level, scale) {
+    W.buildCake = function (level, scale, model) {
       if (W.cake) W.disposeCake();
+      if (model) return buildModelCake(level, model);
       var st = cakeStyle(level.kind);
       var s = scale || 1;
       var group = new THREE.Group();
@@ -527,6 +528,120 @@
       W.cake.aimR = aimR;
       return W.cake;
     };
+
+    /* --- Meshy/블렌더 모델 케이크 --- */
+    var modelCache = {};
+    /** window.MK_MODELS[name] (base64 GLB) 를 읽어 하나의 지오메트리로 정리한다 */
+    W.loadModel = function (name) {
+      if (modelCache[name]) return modelCache[name];
+      var b64 = root.MK_MODELS && root.MK_MODELS[name];
+      if (!b64 || !THREE.GLTFLoader) return Promise.resolve(null);
+      var bin = atob(b64), buf = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      modelCache[name] = new Promise(function (resolve) {
+        new THREE.GLTFLoader().parse(buf.buffer, '', function (gltf) {
+          try { resolve(prepModel(gltf.scene)); } catch (e) { console.warn('model', e); resolve(null); }
+        }, function (e) { console.warn('model', e); resolve(null); });
+      });
+      return modelCache[name];
+    };
+    function prepModel(obj) {
+      obj.updateMatrixWorld(true);
+      var mesh = null;
+      obj.traverse(function (o) { if (o.isMesh && !mesh) mesh = o; });
+      var g = mesh.geometry, out = new THREE.BufferGeometry();
+      ['position', 'normal', 'uv'].forEach(function (name) {
+        var a = g.attributes[name];
+        if (!a) return;
+        var arr = new Float32Array(a.count * a.itemSize); // 양자화된 값을 실수로 풀어 둔다
+        for (var i = 0; i < a.count; i++) {
+          arr[i * a.itemSize] = a.getX(i);
+          arr[i * a.itemSize + 1] = a.getY(i);
+          if (a.itemSize > 2) arr[i * a.itemSize + 2] = a.getZ(i);
+        }
+        out.setAttribute(name, new THREE.BufferAttribute(arr, a.itemSize));
+      });
+      if (g.index) out.setIndex(new THREE.BufferAttribute(new Uint32Array(g.index.array), 1));
+      out.applyMatrix4(mesh.matrixWorld);
+      out = out.toNonIndexed();
+      out.computeBoundingBox();
+      var bb = out.boundingBox;
+      var cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2;
+      out.translate(-cx, -bb.min.y, -cz);
+      var pos = out.attributes.position, R = 0;
+      for (var k = 0; k < pos.count; k++) R = Math.max(R, Math.hypot(pos.getX(k), pos.getZ(k)));
+      var mat = mesh.material;
+      mat.side = THREE.DoubleSide; // 조각 안쪽(빈 껍질)이 보여도 구멍처럼 안 보이게
+      return { geo: out, material: mat, radius: R, height: bb.max.y - bb.min.y };
+    }
+
+    /** 모델을 층(높이 구간) × 부채꼴(각도 구간)으로 잘라, 기본 도형 케이크와 같은 구조로 만든다 */
+    function buildModelCake(level, M) {
+      var R = 6.3, s = R / M.radius, Ht = M.height * s;
+      var group = new THREE.Group();
+      group.position.set(CAKE_X, 0, CAKE_Z);
+      scene.add(group);
+      var doily = new THREE.Mesh(new THREE.CylinderGeometry(R + 1.4, R + 1.4, 0.12, 40), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }));
+      doily.position.y = 0.06;
+      doily.receiveShadow = true;
+      group.add(doily);
+      var n = level.layers.length, K = 10, base = 0.12, slabH = Ht / n;
+      var src = M.geo, P = src.attributes.position, N = src.attributes.normal, U = src.attributes.uv;
+      var buckets = [];
+      for (var t = 0; t < P.count; t += 3) {
+        var cx = (P.getX(t) + P.getX(t + 1) + P.getX(t + 2)) / 3 * s;
+        var cy = (P.getY(t) + P.getY(t + 1) + P.getY(t + 2)) / 3 * s;
+        var cz = (P.getZ(t) + P.getZ(t + 1) + P.getZ(t + 2)) / 3 * s;
+        var bi = Math.min(n - 1, Math.max(0, Math.floor((cy / Ht) * n)));
+        var a = Math.atan2(-cz, cx);
+        if (a < 0) a += Math.PI * 2;
+        var k = Math.min(K - 1, Math.floor((a / (Math.PI * 2)) * K));
+        var key = bi * K + k;
+        var b = buckets[key] || (buckets[key] = { p: [], n: [], u: [] });
+        for (var v = 0; v < 3; v++) {
+          b.p.push(P.getX(t + v) * s, P.getY(t + v) * s - bi * slabH, P.getZ(t + v) * s);
+          if (N) b.n.push(N.getX(t + v), N.getY(t + v), N.getZ(t + v));
+          if (U) b.u.push(U.getX(t + v), U.getY(t + v));
+        }
+      }
+      var styleLayer = { side: '#f4b6c2', inside: '#ffe7d6', top: '#fff4f6' };
+      var layers = [];
+      for (var li = 0; li < n; li++) {
+        var lg = new THREE.Group();
+        lg.position.y = base + li * slabH;
+        group.add(lg);
+        var wedges = [];
+        for (var kk = 0; kk < K; kk++) {
+          var bk = buckets[li * K + kk];
+          if (!bk || !bk.p.length) continue;
+          var geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.Float32BufferAttribute(bk.p, 3));
+          if (bk.n.length) geo.setAttribute('normal', new THREE.Float32BufferAttribute(bk.n, 3));
+          if (bk.u.length) geo.setAttribute('uv', new THREE.Float32BufferAttribute(bk.u, 2));
+          var m = new THREE.Mesh(geo, M.material);
+          m.castShadow = true;
+          m.receiveShadow = true;
+          var a0 = (kk / K) * Math.PI * 2, a1 = ((kk + 1) / K) * Math.PI * 2, mid = (a0 + a1) / 2;
+          m.userData = { mid: mid, dir: new THREE.Vector3(Math.cos(mid), 0, -Math.sin(mid)), r: R, h: slabH, a0: a0, a1: a1 };
+          lg.add(m);
+          wedges.push(m);
+        }
+        var body = new CANNON.Body({ mass: 0, type: CANNON.Body.STATIC, collisionFilterGroup: G.CAKE, collisionFilterMask: G.ITEM | G.CHUNK | G.CLUMP });
+        body.addShape(new CANNON.Cylinder(R * 0.92, R * 0.95, slabH, 16));
+        body.position.set(CAKE_X, base + li * slabH + slabH / 2, CAKE_Z);
+        world.addBody(body);
+        layers.unshift({ group: lg, wedges: wedges, body: body, r: R, h: slabH, y0: base + li * slabH, taper: 1, style: styleLayer, broken: false, crack: 0, toppings: [] });
+      }
+      W.cake = { group: group, layers: layers, style: { r: R, layers: [styleLayer] }, coat: null, aim: null, scale: 1, topY: base + Ht, model: true };
+      if (level.coat) W.addCoat(W.cake, level.coat);
+      var aimR = R + 3, aimH = base + Ht + 6;
+      var aim = new THREE.Mesh(new THREE.CylinderGeometry(aimR, aimR, aimH, 24), new THREE.MeshBasicMaterial({ visible: false }));
+      aim.position.set(CAKE_X, aimH / 2 - 0.5, CAKE_Z);
+      scene.add(aim);
+      W.cake.aim = aim;
+      W.cake.aimR = aimR;
+      return W.cake;
+    }
 
     W.addToppings = function (cake, type) {
       var top = cake.layers[0];

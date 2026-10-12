@@ -195,7 +195,7 @@
     { id: 2, kind: 'mousse', name: '레몬 무스', feature: 'soft', drops: 3, heavy: 6, light: 24,
       intro: '아래 [− 개수 +]로 모을 개수를 정하면 딱 그만큼만 붙어요. 남긴 재료는 점수가 돼요.',
       layers: [{ hp: 14, armor: 0 }] },
-    { id: 3, kind: 'shortcake', name: '딸기 쇼트케이크', feature: 'heavy', drops: 3, heavy: 10, light: 25, piles: 2,
+    { id: 3, kind: 'shortcake', model: 'strawberry', name: '딸기 로즈 티 케이크', feature: 'heavy', drops: 3, heavy: 10, light: 25, piles: 2,
       intro: '반짝이는 쇠구슬·너트는 묵직해서 힘이 2배! 같은 힘을 더 적은 개수로 낼 수 있어요.',
       layers: [{ hp: 26, armor: 0 }] },
     { id: 4, kind: 'choco', name: '초코 가나슈 케이크', feature: 'hard', drops: 3, heavy: 10, light: 25,
