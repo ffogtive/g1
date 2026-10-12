@@ -3,3 +3,4 @@ node_modules/
 .DS_Store
 moakung/dist/
 moakung3d/dist/
+moakung3d/docs/screens/e2e3d-*.png
