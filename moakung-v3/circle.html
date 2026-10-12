@@ -854,7 +854,7 @@
     over.classList.add('show');
   }
   function hideOver() { over.classList.remove('show'); card.innerHTML = ''; }
-  function goBack() { if (history.length > 1) history.back(); else location.href = (location.protocol === 'file:' ? 'index.html' : './'); }
+  function goBack() { location.href = location.protocol === 'file:' ? 'index.html' : './'; }
   function restart() { tutorial = false; newGame(); }
   over.addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; audio(); if (b.dataset.a === 'restart') restart(); else goBack(); });
   document.getElementById('restart').addEventListener('click', function () { audio(); restart(); });

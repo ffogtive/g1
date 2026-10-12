@@ -23,7 +23,7 @@ const run = (W, n) => { for (let i = 0; i < n; i++) R.stepW(W); };
 function place(W, kind, dx) {
   const x = W.plate.getPosition().x + dx;
   if (!R.canDrop(W, x)) return null;
-  const b = R.addFriend(W, kind, x, R.landing(W, kind, x));
+  const b = R.addFriend(W, kind, x, R.landing(W, kind, x));   // 게임과 같이: 착지점 0.04m 위에서 살짝
   run(W, 60); return b;
 }
 const fallen = (W) => W.friends.filter(b => b.ud.fell).length;
@@ -127,7 +127,7 @@ function novice(seed, perShot, off) {
     for (let i = 0; i < n; i++) { place(W, tray.shift(), (r() * 2 - 1) * off); W.friends.filter(b => b.ud.state === 'fell').forEach(b => { dizzy.push(b.ud.kind); R.removeFriend(W, b); }); }
     run(W, 30); W.friends.filter(b => b.ud.state === 'fell').forEach(b => { dizzy.push(b.ud.kind); R.removeFriend(W, b); });
     if (!R.stackFriends(W).length) { tray.push(...dizzy); if (!tray.length) break; continue; }
-    const kp = W.king.getPosition(), th = 35 + r() * 20, noise = [0.15, 0.08, 0.05, 0.05][Math.min(3, LEVEL.flags - flags)], p = aimFor(W, th, kp.x, kp.y) * (1 + (r() * 2 - 1) * noise);
+    const kp = W.king.getPosition(), th = 40 + r() * 25, noise = [0.15, 0.08, 0.05, 0.05][Math.min(3, LEVEL.flags - flags)], p = aimFor(W, th, kp.x, kp.y) * (1 + (r() * 2 - 1) * noise);
     const res = shoot(W, th, Math.min(1, p)); if (!res.cancel && !res.fellInPull) flags--;
     log.push(res); backToTray(); tray.push(...dizzy);
     R.endTurn(W);
@@ -136,7 +136,7 @@ function novice(seed, perShot, off) {
   return W.buckets === 0 ? { win: true, flags, log } : { win: false, left: W.buckets, log };
 }
 function noviceTests() {
-  console.log(`== 초보 정책 (35~55°, 가이드·지난 궤적 보고 왕 근처: 세기 오차 ±15% → 8% → 5%) · 깃발 ${LEVEL.flags} ==`);
+  console.log(`== 초보 정책 (40~65°, 가이드·지난 궤적 보고 왕 근처: 세기 오차 ±15% → 8% → 5%) · 깃발 ${LEVEL.flags} ==`);
   for (const off of [0.12, 0.25]) for (const per of [2, 3]) {
     let w = 0, N = 40, fl = 0, b = 0;
     for (let s = 1; s <= N; s++) { const r = novice(s * 31 + per, per, off); if (r.win) { w++; fl += r.flags; } b += 3 - (r.left || 0); }
