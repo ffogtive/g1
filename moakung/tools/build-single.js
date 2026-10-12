@@ -27,6 +27,8 @@ if (fragment) {
     .replace(/<title>[\s\S]*?<\/title>\s*/, '');
   const body = html.match(/<body>([\s\S]*?)<\/body>/)[1];
   html = title + '\n' + head.trim() + '\n' + body.trim() + '\n';
+  // 호스트 골격이 :root 에 안전영역 여백을 주므로 화면 높이는 100vh 대신 100% 로 맞춘다
+  html = html.replace('height: 100vh; height: 100dvh;', 'height: 100%;');
 }
 
 fs.mkdirSync(path.dirname(out), { recursive: true });
