@@ -22,8 +22,11 @@
   #app { position:fixed; inset:0; padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); }
   #stage { position:relative; width:100%; height:100%; overflow:hidden; background:linear-gradient(#4f8fdc,#8cc2f2); }
   #vids { position:absolute; left:0; top:0; width:100%; height:100%; will-change:transform; }
-  #vids video, #vids img { position:absolute; inset:0; width:100%; height:100%; object-fit:fill; opacity:0; transition:opacity .08s linear; pointer-events:none; }
-  #vids .on { opacity:1; }
+  /* 영상 층: 대기(arm)는 거의 투명하게 깔아 두고(완전 0이면 브라우저가 프레임을 안 그림), 들어오는 층(in)만 위에서 0→1 (JS) */
+  #vids video, #vids img { position:absolute; inset:0; width:100%; height:100%; object-fit:fill; opacity:0; z-index:1; pointer-events:none; }
+  #vids .arm { opacity:.001; }
+  #vids .live { opacity:1; z-index:2; }
+  #vids .in { z-index:3; }
   #vids .mir { transform:scaleX(-1); }
   canvas { position:absolute; inset:0; width:100%; height:100%; touch-action:none; display:block; }
   #over { position:absolute; inset:0; display:none; place-items:center; background:rgba(40,30,25,.38); z-index:5; padding:16px; box-sizing:border-box; }
@@ -45,7 +48,7 @@
 <div id="rot">📱 세로로 돌려 주세요</div>
 <div id="app">
   <div id="stage">
-    <div id="vids"><img id="v_base" class="on" src="real/base.jpg" alt=""></div>
+    <div id="vids"><img id="v_base" class="live" src="real/base.jpg" alt=""></div>
     <canvas id="cv"></canvas>
     <div id="over"><div class="card" id="card"></div></div>
   </div>
@@ -97,35 +100,141 @@
   }
   function framePt(fx, fy, mir) { return { x: VB.x + VB.w * (mir ? 1 - fx : fx), y: VB.y + VB.h * fy }; }
 
-  /* ---------------- 영상 관리자 ---------------- */
+  /* ---------------- 영상 관리자: 끊김 없는 전환 ----------------
+     가설: 끊김은 (1) 되감은 직후 바로 보여줘 옛 프레임이 비치고 (2) 두 층이 함께 페이드돼 배경이 비치고
+           (3) 예고(킁킁)마다 클립을 바꿔서 생긴다.
+     → 숨긴 채 다음 시작점으로 미리 되감아 두고(prime), 새 프레임이 준비된 뒤 위층만 0→1로 올린다(cut).
+       판정은 게임 시계가 정하고, 영상은 그 시각을 따라가기만 한다(follow: 늦으면 살짝 빨리, 많이 늦으면 다시 맞춤). */
   var VE = { base: document.getElementById('v_base') }, cur = { f: 'base', mir: false }, seg = null;
+  var FADE = 0.12, LATE_MAX = 0.25, fading = null, VLOG = [], VSTAT = { cuts: 0, late: 0, seekLive: 0, resync: 0, tellCuts: 0, minCover: 1 };
+  function playV(v) { var p = v.play(); if (p && p.catch) p.catch(function () { /* 무시 */ }); }
   function makeVideo(f) {
-    var v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto';
+    var v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; v.className = 'arm';
     v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
     v.innerHTML = '<source src="real/' + f + '.webm" type="video/webm"><source src="real/' + f + '.mp4" type="video/mp4">';
     if (f === 'sniff') v.loop = true;
+    v._f = f; v._want = null; v._armed = false; v._tok = 0; v._mir = false;
+    v.addEventListener('loadeddata', function () { if (v._want == null) prime(f, nextStart(f), false); else if (!v._armed) prime(f, v._want, v._mir, true); });
     vids.appendChild(v); VE[f] = v; return v;
   }
   FIRST_FILES.forEach(makeVideo);
   setTimeout(function () { MORE_FILES.forEach(makeVideo); }, 400);   // 나머지는 뒤에서 받음
   function ok(f) { return VE[f] && VE[f].readyState >= 2; }
   function okSet(st) { return ok(st.file) && ok(st.rev) && ok(st.lick); }
-  function show(f, mir) {
-    var v = VE[f];
-    if (cur.f !== f) { VE[cur.f].classList.remove('on'); if (cur.f !== 'base') VE[cur.f].pause(); v.classList.add('on'); }
-    v.classList.toggle('mir', !!mir); cur = { f: f, mir: !!mir };
+  /** 숨긴 클립이 다음에 쓰일 시작점 (쓰고 나면 여기로 미리 되감아 둔다) */
+  function nextStart(f) {
+    if (f === 'sniff') return 0;
+    for (var k in PRESS) { var p = PRESS[k]; if (p.file === f) return p.appr[0]; if (p.lick === f) return p.lickFrom; if (p.rev === f) return DUR - p.hold[0]; }
+    if (f === PAWS.file) return PAWS.tell[0];
+    if (f === SNEEZE.file) return SNEEZE.seg[0];
+    return 0;
   }
-  /** 클립 f의 [from, to] 구간을 dur초에 맞춰 재생, 끝나면 then */
-  function playSeg(f, from, to, dur, mir, then) {
+  /** 숨긴 채 t초로 되감아, 그 프레임이 실제로 준비되면 armed (보이는 층·페이드 중인 층은 건드리지 않음) */
+  function prime(f, t, mir, force) {
+    var v = VE[f]; if (!v || f === 'base' || f === cur.f || (fading && (fading.v === v || fading.old === v))) return;
+    mir = !!mir; if (v._mir !== mir) { v._mir = mir; v.classList.toggle('mir', mir); }
+    if (!force && v._want != null && Math.abs(v._want - t) < 0.01 && (v._armed || v.seeking)) return;
+    v._want = t; v._armed = false; var tok = ++v._tok;
+    if (v.readyState < 1) return;   // loadeddata에서 다시
+    try { if (!v.paused) v.pause(); } catch (e) { /* 무시 */ }
+    function fin(mt) {
+      if (tok !== v._tok) return;
+      if (v.readyState >= 2) { v._armed = true; v._mt = mt; }
+      else setTimeout(function () { if (tok === v._tok) prime(f, t, v._mir, true); }, 120);
+    }
+    function waitFrame() {   // 되감은 프레임이 실제로 그려질 때까지 (없으면 rAF 두 번)
+      if (v.requestVideoFrameCallback) {
+        var done = false, to = setTimeout(function () { if (!done) { done = true; fin(v.currentTime); } }, 160);
+        v.requestVideoFrameCallback(function (n, md) { if (done) return; done = true; clearTimeout(to); fin(md && md.mediaTime != null ? md.mediaTime : v.currentTime); });
+      } else requestAnimationFrame(function () { requestAnimationFrame(function () { fin(v.currentTime); }); });
+    }
+    if (Math.abs(v.currentTime - t) < 0.002 && !v.seeking && v.readyState >= 2) { fin(v.currentTime); return; }
+    function onSeeked() { v.removeEventListener('seeked', onSeeked); if (tok === v._tok) waitFrame(); }
+    v.addEventListener('seeked', onSeeked);
+    try { v.currentTime = t; } catch (e) { v.removeEventListener('seeked', onSeeked); }
+  }
+  /** 클립 f의 [from, to] 구간을 게임 시간 dur초에 맞춰 재생, 끝나면 then. loop면 그냥 반복 */
+  function playSeg(f, from, to, dur, mir, then, loop) {
     var v = VE[f]; if (!v) return;
-    try { v.currentTime = from; } catch (e) { /* 무시 */ }
-    v.playbackRate = Math.max(0.25, Math.min(4, (to - from) / Math.max(0.05, dur)));
-    var p = v.play(); if (p && p.catch) p.catch(function () { /* 무시 */ });
-    show(f, mir); seg = { f: f, to: to, then: then || null };
+    if (fading) endFade();
+    mir = !!mir;
+    if (G && G.atk && G.atk.st && G.atk.st.k === 'tell') VSTAT.tellCuts++;   // 예고(킁킁) 중 전환 — 0이어야 함
+    var rate = loop ? 1 : Math.max(0.25, Math.min(4, (to - from) / Math.max(0.05, dur)));
+    seg = { f: f, from: from, to: to, dur: dur, rate: rate, mir: mir, then: then || null, loop: !!loop, el: 0, waited: 0, shown: false, fired: false };
+    if (f === cur.f) {   // 같은 층: 되감지 않고 이어서 (거리가 멀 때만 그 자리에서 되감음)
+      if (cur.mir !== mir) { v.classList.toggle('mir', mir); v._mir = mir; cur.mir = mir; }
+      var ct0 = v.currentTime;
+      if (!loop && Math.abs(ct0 - from) < 0.3 && ct0 < to - 0.02) { seg.from = from = ct0; seg.rate = rate = Math.max(0.25, Math.min(4, (to - ct0) / Math.max(0.05, dur))); }   // 조금 덜 왔거나 앞섰으면 그 자리에서 이어 감
+      var far = !loop && Math.abs(ct0 - from) > 0.06;
+      if (far) { try { v.currentTime = from; } catch (e) { /* 무시 */ } VSTAT.seekLive++; }
+      v._armed = false; v._want = null;   // 재생을 시작하면 '준비됨' 표시는 무효
+      v.playbackRate = rate; playV(v); seg.shown = true; vlog(far ? 'seek' : 'same', v, 0, ct0); return;
+    }
+    prime(f, from, mir);
+    tryReveal();
   }
-  function pauseVideo() { seg = null; if (cur.f !== 'base') VE[cur.f].pause(); }
-  function idle() { seg = null; var v = VE.sniff; v.playbackRate = 1; try { v.currentTime = 0; } catch (e) { /* 무시 */ } var p = v.play(); if (p && p.catch) p.catch(function () { /* 무시 */ }); show('sniff', false); }
-  function tickVideo() { if (!seg) return; var v = VE[seg.f]; if (v.currentTime >= seg.to - 0.03 || v.ended) { var f = seg.then; seg = null; if (f) f(); else v.pause(); } }
+  function tryReveal() {
+    var v = VE[seg.f], armed = v._armed && Math.abs(v._want - seg.from) < 0.01 && v._mir === seg.mir;
+    if (armed || (seg.waited >= LATE_MAX && v.readyState >= 2 && cur.f !== 'base')) reveal(!armed);
+  }
+  function reveal(late) {
+    var v = VE[seg.f], old = VE[cur.f], mt = v.currentTime;
+    v._armed = false; v._want = null;   // 재생을 시작하면 '준비됨' 표시는 무효 (다음 사용 전 다시 prime)
+    v.playbackRate = seg.rate; if (!seg.pauseOnShow) playV(v);
+    v.classList.remove('arm'); v.classList.add('in'); v.style.opacity = '0';
+    fading = { v: v, old: old, oldF: cur.f, t: 0 };
+    cur = { f: seg.f, mir: seg.mir }; seg.shown = true;
+    VSTAT.cuts++; if (late) VSTAT.late++;
+    vlog('cut', v, late ? seg.waited : 0, mt);
+  }
+  function endFade() {
+    var F = fading; if (!F) return; fading = null;
+    F.v.style.opacity = ''; F.v.classList.remove('in'); F.v.classList.add('live');
+    if (F.old && F.old !== F.v) {
+      F.old.classList.remove('live', 'in'); F.old.style.opacity = '';
+      if (F.oldF !== 'base') {
+        F.old.classList.add('arm'); try { F.old.pause(); } catch (e) { /* 무시 */ }
+        var f = F.oldF; setTimeout(function () { if (cur.f !== f) prime(f, nextStart(f), false); }, 150);   // 돌진 중 디코더 다툼을 피해 조금 뒤에
+      }
+    }
+  }
+  function vlog(kind, v, late, at) {
+    if (VLOG.length > 400) VLOG.shift();
+    VLOG.push({ t: G ? +G.play.toFixed(2) : 0, k: kind, f: seg.f, from: +seg.from.toFixed(3), mt: +((at != null ? at : v.currentTime) || 0).toFixed(3), rate: +seg.rate.toFixed(2),
+      late: +late.toFixed(3), step: G && G.atk && G.atk.st ? G.atk.st.k : '' });
+  }
+  /** 매 프레임: 페이드 진행 + 영상이 게임 시계의 목표 시각을 따라가게 */
+  function follow(dt) {
+    if (fading) { fading.t += dt; var o = Math.min(1, fading.t / FADE); fading.v.style.opacity = o.toFixed(3); if (o >= 1) endFade(); }
+    VSTAT.minCover = Math.min(VSTAT.minCover, vids.querySelector('.live') ? 1 : fading ? +fading.v.style.opacity : 0);
+    if (!seg) return;
+    if (!seg.shown) { seg.waited += dt; tryReveal(); }
+    seg.el += dt;
+    if (seg.loop) return;
+    var v = VE[seg.f], q = Math.min(1, seg.el / seg.dur), exp = seg.from + (seg.to - seg.from) * q;
+    if (seg.shown && !seg.pauseOnShow) {
+      var ct = v.currentTime, e = exp - ct, fr = 1 / 24;
+      if (ct >= seg.to - 0.01 || (q >= 1 && e < fr * 0.5)) { if (!v.paused) v.pause(); }
+      else if (e > 0.35) { vlog('resync', v, 0, ct); try { v.currentTime = Math.min(seg.to, exp + 0.05); } catch (er) { /* 무시 */ } VSTAT.resync++; }
+      else {
+        var r = seg.rate;
+        if (e > fr) r = seg.rate * Math.min(2, 1 + e / 0.15); else if (e < -fr) r = seg.rate * Math.max(0.5, 1 + e / 0.15);
+        r = Math.max(0.25, Math.min(4, r));
+        if (Math.abs(r - v.playbackRate) > v.playbackRate * 0.05) v.playbackRate = r;   // 자잘한 변경은 생략 (사파리 보호)
+        if (v.paused) playV(v);
+      }
+    }
+    if (q >= 1 && !seg.fired) { seg.fired = true; if (seg.then) seg.then(); }
+  }
+  function pauseVideo() { if (seg && !seg.shown) { seg.pauseOnShow = true; return; } seg = null; if (cur.f !== 'base') VE[cur.f].pause(); }
+  function idle() { playSeg('sniff', 0, DUR, DUR, false, null, true); }
+  /** iOS(저전력 등)에서 준비가 멈춘 영상을 첫 터치에 깨움 */
+  function warmAll() {
+    Object.keys(VE).forEach(function (f) {
+      var v = VE[f]; if (f === 'base' || f === cur.f || v.readyState >= 2) return;
+      var p = v.play(); if (p && p.then) p.then(function () { if (f !== cur.f) { v.pause(); prime(f, v._want != null ? v._want : nextStart(f), v._mir, true); } }).catch(function () { /* 무시 */ });
+    });
+  }
   var ready = 0, readyAll = 0;
   function checkReady() { ready = FIRST_FILES.filter(ok).length; readyAll = FIRST_FILES.concat(MORE_FILES).filter(ok).length; }
 
@@ -181,7 +290,7 @@
   function toL(e) { var r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s }; }
   var drags = {};
   cv.addEventListener('pointerdown', function (e) {
-    audio(); var p = toL(e);
+    audio(); warmAll(); var p = toL(e);
     if (G.state === 'title') { if (ready < FIRST_FILES.length) return; newGame(true); G.cookie.tx = clampX(p.x); drags[e.pointerId] = true; try { cv.setPointerCapture(e.pointerId); } catch (er) { /* 무시 */ } return; }
     if (G.state !== 'play') return;
     try { cv.setPointerCapture(e.pointerId); } catch (er) { /* 무시 */ }
@@ -208,6 +317,8 @@
     var p = framePt(a.set.land.x, a.set.land.y, a.mir);
     setOriginY(p.y); a.shiftT = solveShift(p.x, x, 1 + (a.P.big ? 0.22 : 0.08)); G.lanes.push(a.lane + ':' + a.key + (a.mir ? 'm' : ''));
   }
+  /** 예고 중: 지금 노리는 칸의 돌진 클립을 숨긴 채 다가옴 시작점에 준비 (같으면 아무 일 없음) */
+  function primeLane(a, x) { var L = laneSet(laneOf(x), a.laneRoll); prime(L.set.file, L.set.appr[0], L.mir); }
   function setOriginY(y) { G.shiftY += (G.oy - y) * (1 - G.zoom); G.oy = y; }   // 세로 기준점을 옮겨도 튀지 않게 (shiftY는 천천히 0으로)
   function coverZ(sh) {   // 이만큼 밀었을 때 영상 가장자리가 안 보이려면 필요한 확대 (가로 기준점 = 화면 가운데)
     return Math.max(1, (G.ox + sh + 4) / Math.max(1, G.ox - VB.x), (Wl - G.ox - sh + 4) / Math.max(1, VB.x + VB.w - G.ox));
@@ -266,8 +377,10 @@
     if (st.k === 'tell') {
       a.locked = false; a.fake = false; if (!st.grow) a.r = RULE.HIT_R;
       SND.sniff(); if (st.grow) SND.inhale();
-      if (a.retell && a.i === 0) { a.tx = C.x; lock(a); playSeg('press', 1.0, 1.4, a.dur, false, null); }   // 연타: 지금 쿠키 자리를 바로 잠금
-      else { playSeg('press', a.i === 0 ? 0.7 : 1.0, 1.4, a.dur, false, null); if (a.i === 0) pop('킁킁', Wl * 0.76, Hl * 0.3, 28, '#ffffff'); }
+      // 예고 동안에는 클립을 바꾸지 않는다 (킁킁 = 지금 보이는 루프·정지 그대로). 돌진할 칸의 클립만 미리 준비
+      if (a.retell && a.i === 0) { a.tx = C.x; lock(a); }   // 연타: 지금 쿠키 자리를 바로 잠금
+      else if (a.i === 0) pop('킁킁', Wl * 0.76, Hl * 0.3, 28, '#ffffff');
+      primeLane(a, a.locked ? a.lockX : a.tx);
     } else if (st.k === 'lunge') {
       a.fake = !!st.fake; if (!a.fake) lock(a);
       var x = a.locked ? a.lockX : a.tx;
@@ -275,11 +388,16 @@
       a.shift0 = G.shift; a.frac = st.zTo || 1;
       var from = a.held ? apprAt(a.set, 0.25) : a.set.appr[0];
       playSeg(a.set.file, from, apprAt(a.set, a.frac), a.dur, a.mir, null); SND.whoosh();
+      // 다음에 쓸 수 있는 클립을 숨긴 채 미리: 잡힘(날름), 가짜(거꾸로), 연타(거꾸로 물러남)
+      prime(a.set.lick, a.set.lickFrom, a.mir);
+      if (a.fake) prime(a.set.rev, DUR - apprAt(a.set, a.frac), a.mir);
+      else if (a.P.reps) prime(a.set.rev, DUR - a.set.hold[0], a.mir);
     } else if (st.k === 'hold') {
       lock(a); aimLane(a, a.lockX); a.held = true; a.shift0 = G.shift;
       var set = a.set; playSeg(set.file, set.appr[0], apprAt(set, 0.25), 0.18, a.mir, pauseVideo);   // 조금 다가오다 멈칫
     } else if (st.k === 'tilt') {   // 가짜: 오던 길을 거꾸로 → 혀 내밀고 메롱
       var tf = apprAt(a.set, a.frac), set2 = a.set, mir = a.mir;
+      prime(TEASE.file, TEASE.seg[0], false);
       playSeg(set2.rev, DUR - tf, DUR - set2.appr[0], 0.25, mir, function () { playSeg(TEASE.file, TEASE.seg[0], TEASE.seg[1], 0.45, false, null); });
       G.shiftT = 0; pop('메롱', Wl * 0.7, Hl * 0.22, 30, '#ff9ec0'); SND.tease();
     } else if (st.k === 'stamp') {
@@ -287,8 +405,8 @@
     } else if (st.k === 'back') {
       if (a.paws) { a.dur = 0.9; playSeg(PAWS.file, PAWS.back[0], PAWS.back[1], a.dur, a.mir, null); G.shiftT = 0; }
       else if (a.caught) { a.dur = 2.0; playSeg(a.set.lick, a.set.lickFrom, DUR, a.dur, a.mir, null); setTimeout(function () { if (G && !G.shot) snapShot(); }, 300); }   // 같은 방향으로 날름
-      else if (a.P.reps && a.rep < a.P.reps && G.endT == null) { a.dur = COMBO_BACK; var set3 = a.set; playSeg(set3.rev, DUR - set3.hold[0], DUR - set3.appr[0], a.dur, a.mir, null); }   // 연타: 거꾸로 빠르게 물러남
-      else { a.dur = 0.9; playSeg(a.set.file, a.set.back[0], a.set.back[1], a.dur, a.mir, null); G.shiftT = 0; }
+      else if (a.P.reps && a.rep < a.P.reps && G.endT == null) { a.dur = COMBO_BACK; var set3 = a.set, r0 = DUR - set3.hold[0]; playSeg(set3.rev, r0, Math.min(DUR - set3.appr[0], r0 + 3.6 * a.dur), a.dur, a.mir, null); }   // 연타: 거꾸로 빠르게 물러남 (4배속 안에서)
+      else { a.dur = 0.9; playSeg(a.set.file, a.set.hold[1], a.set.back[1], a.dur, a.mir, null); G.shiftT = 0; }   // 꾹 끝에서 이어서 물러남 (되감기 없음)
     } else if (st.k === 'paws') {   // 앞발: 쿠키 쪽 앞발을 들어 같은 자리를 톡톡 (오른쪽이면 반전)
       a.paws = true; a.mir = C.x > Wl / 2; a.r = RULE.PAW_R; a.locked = true;
       var T = Math.max(70, Math.min(Wl - 70, C.x)), pp = framePt(PAWS.land.x, PAWS.land.y, a.mir);
@@ -306,7 +424,7 @@
     a.t += dt;
     var k = a.st.k, q = Math.min(1, a.t / a.dur);
     if (k === 'tell') {
-      if (!a.locked) { a.tx += (C.x - a.tx) * Math.min(1, dt * 7); G.shiftT = (a.tx - Wl / 2) * 0.12; }
+      if (!a.locked) { a.tx += (C.x - a.tx) * Math.min(1, dt * 7); G.shiftT = (a.tx - Wl / 2) * 0.12; primeLane(a, a.tx); }
       if (a.st.grow) a.r = RULE.HIT_R + (a.st.grow - RULE.HIT_R) * Math.min(1, q * 1.4);
       G.zoomWant = 1;
     } else if (k === 'lunge') {
@@ -428,7 +546,7 @@
     G.prints = G.prints.filter(function (p) { p.t += dt; return p.t < p.life; });
     G.fx = G.fx.filter(function (p) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 120 * dt; return p.t < p.life; });
     G.pops = G.pops.filter(function (p) { p.t += dt; return p.t < p.life; });
-    tickVideo();
+    follow(dt);
     if (G.state === 'play') {
       G.play += dt; updateAttack(dt);
       if (G.endT != null) { G.endT -= dt; if (G.endT <= 0) gameOver(); }
@@ -550,8 +668,10 @@
         atk: a && a.st ? { kind: a.kind, step: a.st.k, phase: a.fake ? 'fake' : a.st.k, i: a.i, rep: a.rep, t: +a.t.toFixed(3), fake: a.fake ? 1 : 0, color: a.locked ? 'red' : 'white', first: a.first ? 1 : 0,
           r: Math.round(a.r), tx: aim == null ? null : Math.round(aim), stx: aim == null ? null : toClient(aim, 0).x, lane: a.lane == null ? null : a.lane, key: a.key || null, mir: a.mir ? 1 : 0,
           hits: hits.map(function (v) { return [Math.round(v[0]), Math.round(v[1])]; }), shits: hits.map(function (v) { return [toClient(v[0], 0).x, toClient(v[1], 0).x]; }) } : null,
-        nose: { sx: cn.x, sy: cn.y, r: Math.round(n.r * s) }, over: document.getElementById('over').classList.contains('show'), shot: !!G.shot };
-    }
+        nose: { sx: cn.x, sy: cn.y, r: Math.round(n.r * s) }, over: document.getElementById('over').classList.contains('show'), shot: !!G.shot,
+        vstat: { cuts: VSTAT.cuts, late: VSTAT.late, seekLive: VSTAT.seekLive, resync: VSTAT.resync, tellCuts: VSTAT.tellCuts, minCover: VSTAT.minCover, fading: fading ? 1 : 0 } };
+    },
+    vlog: function () { return VLOG.slice(); }
   };
 
   resize(); newGame(false); requestAnimationFrame(frame);

@@ -40,6 +40,7 @@ function safeX(hits, cur, W = 390) {
   const srv = await serve(), BASE = `http://127.0.0.1:${srv.address().port}/real.html`;
   const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] });
   const errs = []; let F2 = 0;
+  const V = { cuts: [], late: 0, tellCuts: 0, minCover: 1, seekLive: 0, resync: 0 };   // 끊김 지표 (모든 판 합산)
   async function open(q) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true });
     const page = await ctx.newPage();
@@ -53,7 +54,13 @@ function safeX(hits, cur, W = 390) {
     T.tap = async (x, y) => { await T.touch('touchStart', x, y); await T.touch('touchEnd'); };
     T.moveTo = async x => { for (let i = 1; i <= 3; i++) await T.touch('touchMove', T.fx + (x - T.fx) * i / 3, FY); T.fx = x; };
     T.start = async (all = true) => { await T.waitFor(all ? 'q.readyAll === q.files' : 'q.ready >= 4', 40000); await T.tap(195, FY); await T.waitFor('q.state === "play"', 3000); await T.touch('touchStart', 195, FY); T.fx = 195; };
-    T.close = async () => { F2 += (await T.snap()).warnF2; await ctx.close(); };
+    T.close = async () => {
+      const q = await T.snap(), vl = await page.evaluate(() => window.kung.vlog());
+      F2 += q.warnF2; V.late += q.vstat.late; V.tellCuts += q.vstat.tellCuts; V.minCover = Math.min(V.minCover, q.vstat.minCover); V.seekLive += q.vstat.seekLive; V.resync += q.vstat.resync;
+      vl.filter(e => e.k === 'cut').forEach(e => V.cuts.push(e));
+      vl.filter(e => e.k === 'seek' || e.k === 'resync').forEach(e => (V.seeks = V.seeks || []).push(Object.assign({ page: page.url().split('?')[1] }, e)));
+      await ctx.close();
+    };
     // 클립 전환 기록
     await page.evaluate(() => { window.__clips = []; (function loop() { const q = window.kung.snapshot(); const l = window.__clips[window.__clips.length - 1]; const k = q.clip + (q.mir ? '~' : ''); if (!l || l !== k) window.__clips.push(k); requestAnimationFrame(loop); })(); });
     return T;
@@ -99,6 +106,7 @@ function safeX(hits, cur, W = 390) {
     ok(`${pat}: 빨간 구간 밖으로 피하면 다 피함 (공격 3번 = 판정 ${3 * per}번)`, q.hearts === 3 && q.dodges >= 3 * per, JSON.stringify({ h: q.hearts, d: q.dodges, hit: q.hitKinds }) + ' clips ' + clips.slice(0, 14).join('>'));
     if (/double|triple/.test(pat)) ok(`${pat}: 연타 사이 거꾸로 재생본으로 빠르게 물러남`, clips.some(c => /_rev/.test(c)), clips.slice(0, 12).join('>'));
     if (pat === 'paws') ok('paws: 앞발 클립 사용', clips.some(c => /^paws/.test(c)), clips.slice(0, 10).join('>'));
+    if (pat === 'kung') { const vs = (await T.snap()).vstat; ok('끊김: 킁 한 번에 전환은 2번뿐 (킁킁 루프 → 돌진 → 킁킁 루프)', vs.cuts <= 1 + 2 * q.kinds.length, JSON.stringify({ cuts: vs.cuts, attacks: q.kinds.length })); }
     await T.close();
   }
 
@@ -160,6 +168,14 @@ function safeX(hits, cur, W = 390) {
     const img = await T.page.evaluate(() => { const i = document.querySelector('#card img.shot'); return i ? i.src.length : 0; });
     ok('하트 0 → 결과 카드 · 날름 한 컷(영상 합성)', q && q.over && img > 5000, 'shot bytes=' + img);
     await T.close();
+  }
+  {
+    const bad = V.cuts.filter(e => Math.abs(e.mt - e.from) > 0.07);
+    ok('끊김: 전환마다 새 층의 첫 프레임이 목표 시각 ±0.07초 (옛 프레임이 안 비침)', V.cuts.length > 20 && bad.length === 0, `cuts=${V.cuts.length} bad=${JSON.stringify(bad.slice(0, 3))}`);
+    ok('끊김: 준비가 늦어 그냥 보여준 전환 0', V.late === 0, 'late=' + V.late);
+    ok('끊김: 예고(킁킁) 중 클립 전환 0', V.tellCuts === 0, 'tellCuts=' + V.tellCuts);
+    ok('끊김: 페이드 중에도 화면이 늘 덮임 (배경이 안 비침)', V.minCover >= 0.99, 'minCover=' + V.minCover);
+    ok('끊김: 보이는 영상을 그 자리에서 되감거나 다시 맞춘 횟수 0 (이어 재생만)', V.seekLive === 0 && V.resync === 0, `seekLive=${V.seekLive} resync=${V.resync} ` + JSON.stringify((V.seeks || []).slice(0, 4)));
   }
   ok('공정성: 안전 구간 부족 경고 0', F2 === 0, 'warnF2=' + F2);
   ok('콘솔 오류 0', errs.length === 0, errs.slice(0, 3).join(' | '));
