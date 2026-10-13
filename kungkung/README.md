@@ -90,3 +90,17 @@
   - 끊김 지표: 전환 첫 프레임 ±0.07초, 늦은 전환 0, 예고 중 전환 0, 화면 덮임 1, 보이는 층 되감기 0.
   - 소리 샘플 받기와 대체가 되고, 콘솔 오류는 0이다.
 - v2(하늘 구도 5칸, `real/press*` 등)는 git 기록에 남아 있다. 5칸 완성 때 `real/`에서 옛 소재를 지운다.
+
+## 아이폰 앱 (Flutter) — `app/`
+
+**가설:** 검증된 웹 게임을 다시 짜지 않고, 앱 안 로컬 서버(영상 Range 지원)와 WKWebView로 띄우면 아이폰에서 그대로 돈다.
+
+- 설치 순서(Mac + 유료 개발자 계정)는 [`app/README.md`](app/README.md)에 있다. 요약하면 `./tool/sync_web.sh` → `flutter pub get` → Xcode에서 팀 선택 → `flutter run --release`다.
+- `real.html` 앱 대응:
+  - `window.KungNative`(앱 채널)가 있거나 아이폰이면 영상은 mp4만 쓴다.
+  - 진동 `buzz()`는 앱 햅틱으로 보낸다.
+  - 일반 브라우저에서의 동작은 그대로다.
+- 검증(Linux 컨테이너):
+  - `flutter analyze` 0건, 서버 단위 테스트 7/7
+  - 앱 서버 코드(`app/tool/serve.dart`)로 E2E 49/49: `BASE_URL=http://127.0.0.1:8790 node tools/e2e-real.js`
+  - 앱 경로 점검: mp4만 쓰는지, 물리면 `buzz:40,30,60`이 앱으로 가는지

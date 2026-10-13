@@ -49,7 +49,8 @@ async function patch(page, buf, x, y, r = 12) {
 const isGrass = c => c[1] > c[0] * 1.15 && c[1] > c[2] * 1.15;
 
 (async () => {
-  const srv = await serve(), BASE = `http://127.0.0.1:${srv.address().port}/${PAGE}`;
+  /* BASE_URL을 주면 그 서버(예: 앱의 Dart 로컬 서버, app/tool/serve.dart)로 돌린다 */
+  const srv = process.env.BASE_URL ? null : await serve(), BASE = process.env.BASE_URL ? process.env.BASE_URL.replace(/\/$/, '') + '/' + PAGE : `http://127.0.0.1:${srv.address().port}/${PAGE}`;
   const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] });
   const errs = []; let F2 = 0;
   const V = { cuts: [], late: 0, tellCuts: 0, minCover: 1, seekLive: 0, resync: 0, seeks: [] };   // 끊김 지표 (모든 판 합산)
@@ -244,6 +245,6 @@ const isGrass = c => c[1] > c[0] * 1.15 && c[1] > c[2] * 1.15;
   ok('공정성: 안전 구간 부족 경고 0', F2 === 0, 'warnF2=' + F2);
   ok('콘솔 오류 0', errs.length === 0, errs.slice(0, 3).join(' | '));
   console.log('\n' + results.filter(r => r[0] === 'PASS').length + '/' + results.length + ' PASS   스크린샷: ' + OUT);
-  await browser.close(); srv.close();
+  await browser.close(); if (srv) srv.close();
   process.exit(results.every(r => r[0] === 'PASS') ? 0 : 1);
 })();

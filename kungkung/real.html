@@ -123,11 +123,15 @@
        판정은 게임 시계가 정하고, 영상은 그 시각을 따라가기만 한다(follow: 늦으면 살짝 빨리, 많이 늦으면 다시 맞춤). */
   var VE = { base: document.getElementById('v_base') }, cur = { f: 'base', mir: false }, seg = null;
   var FADE = 0.12, LATE_MAX = 0.25, fading = null, VLOG = [], VSTAT = { cuts: 0, late: 0, seekLive: 0, resync: 0, tellCuts: 0, minCover: 1 };
+  /* 아이폰 앱(Flutter)에서는 window.KungNative 채널이 있다. 아이폰·앱이면 mp4를 쓰고, 진동은 앱 햅틱으로 보낸다. */
+  var NATIVE = window.KungNative && window.KungNative.postMessage ? window.KungNative : null;
+  var MP4_FIRST = !!NATIVE || /iP(hone|ad|od)/.test(navigator.userAgent);
   function playV(v) { var p = v.play(); if (p && p.catch) p.catch(function () { /* 무시 */ }); }
   function makeVideo(f) {
     var v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; v.className = 'arm';
     v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
-    v.innerHTML = '<source src="real/' + f + '.webm" type="video/webm"><source src="real/' + f + '.mp4" type="video/mp4">';
+    var webm = '<source src="real/' + f + '.webm" type="video/webm">', mp4 = '<source src="real/' + f + '.mp4" type="video/mp4">';
+    v.innerHTML = MP4_FIRST ? mp4 : webm + mp4; /* 아이폰(앱·사파리)은 mp4만: 앱에는 webm을 넣지 않는다 */
     if (f === IDLE) v.loop = true;
     v._f = f; v._want = null; v._armed = false; v._tok = 0; v._mir = false;
     v.addEventListener('loadeddata', function () { if (v._want == null) prime(f, nextStart(f), false); else if (!v._armed) prime(f, v._want, v._mir, true); });
@@ -338,7 +342,7 @@
   var SND = {};
   Object.keys(SYN).forEach(function (k) { SND[k] = function (x) { if (!playSfx(k)) SYN[k](x); }; });
   loadSfx();
-  function buzz(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* 무시 */ } }
+  function buzz(p) { try { if (NATIVE) NATIVE.postMessage('buzz:' + p); else if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* 무시 */ } }
 
   /* ---------------- 입력 ---------------- */
   function toL(e) { var r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s }; }
