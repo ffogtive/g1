@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>킁킁! 실사</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
+<!--
+  킁킁! 실사 손맛 시험판
+  가설: 카메라가 바닥에 고정된 게임이라, AI로 만든 실사 영상 클립(같은 프레임에서 시작·끝)을 상태마다 갈아 끼우면
+        젖은 코·혀 질감을 실시간 3D 없이 얻는다. 판정·조작은 그림 버전(index.html)과 같고, 그림만 영상으로 바꾼다.
+  - 클립 3개: sniff(두리번·킁킁, 평소 반복), press(코가 렌즈로 꾹 → 물러남), lick(렌즈 핥기)
+  - 코가 좌우 목표로 오도록 영상 층을 옆으로 민다 (가장자리는 하늘색으로 채움)
+  - 테스트 옵션: ?seed=숫자
+-->
+<style>
+  :root { --ink:#3b2a22; --pill:rgba(255,255,255,.92); --line:#e7d6c8; --accent:#ff7a59; color-scheme: light; }
+  html, body { margin:0; height:100%; overscroll-behavior:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent; touch-action:none; color:var(--ink); background:#5f9fe0; font-family:"Jua","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif; }
+  #app { position:fixed; inset:0; padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); }
+  #stage { position:relative; width:100%; height:100%; overflow:hidden; background:linear-gradient(#4f8fdc,#8cc2f2); }
+  #vids { position:absolute; left:0; top:0; width:100%; height:100%; transform-origin:51% 40%; will-change:transform; }
+  #vids video, #vids img { position:absolute; inset:0; width:100%; height:100%; object-fit:fill; opacity:0; transition:opacity .08s linear; pointer-events:none; }
+  #vids .on { opacity:1; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; touch-action:none; display:block; }
+  #over { position:absolute; inset:0; display:none; place-items:center; background:rgba(40,30,25,.38); z-index:5; padding:16px; box-sizing:border-box; }
+  #over.show { display:grid; }
+  .card { background:#fffaf3; border-radius:24px; padding:18px 22px; text-align:center; box-shadow:0 12px 40px rgba(59,42,34,.35); animation:pop .3s cubic-bezier(.2,1.5,.5,1); max-width:300px; }
+  @keyframes pop { from { transform:scale(.8); opacity:0; } }
+  .card h2 { margin:0 0 6px; font-weight:normal; font-size:30px; }
+  .big { font-size:40px; margin:2px 0; font-variant-numeric:tabular-nums; }
+  .sub { font-size:15px; color:#8a6a5a; margin:4px 0 12px; line-height:1.5; }
+  .shot { display:block; width:170px; height:238px; margin:6px auto 10px; border-radius:6px; background:#fff; padding:6px 6px 22px; box-shadow:0 4px 14px rgba(0,0,0,.18); transform:rotate(-2deg); object-fit:cover; }
+  .row { display:flex; gap:10px; justify-content:center; }
+  .pill { min-width:72px; height:52px; border:0; border-radius:999px; background:var(--pill); box-shadow:0 3px 0 var(--line); font:inherit; font-size:24px; color:var(--ink); padding:0 18px; cursor:pointer; }
+  .pill.main { background:var(--accent); color:#fff; box-shadow:0 3px 0 #c9553a; }
+  #load { position:absolute; inset:0; display:grid; place-items:center; font-size:22px; color:#fff; text-shadow:0 2px 0 #3b2a22; z-index:6; pointer-events:none; }
+  #rot { position:fixed; inset:0; display:none; place-items:center; text-align:center; font-size:22px; background:#fff1cf; z-index:20; }
+  @media (orientation: landscape) and (max-height: 520px) { #rot { display:grid; } }
+</style>
+</head>
+<body>
+<div id="rot">📱 세로로 돌려 주세요</div>
+<div id="app">
+  <div id="stage">
+    <div id="vids">
+      <img id="v_base" class="on" src="real/base.jpg" alt="">
+      <video id="v_sniff" muted playsinline preload="auto" loop><source src="real/sniff.webm" type="video/webm"><source src="real/sniff.mp4" type="video/mp4"></video>
+      <video id="v_press" muted playsinline preload="auto"><source src="real/press.webm" type="video/webm"><source src="real/press.mp4" type="video/mp4"></video>
+      <video id="v_lick" muted playsinline preload="auto"><source src="real/lick.webm" type="video/webm"><source src="real/lick.mp4" type="video/mp4"></video>
+    </div>
+    <canvas id="cv"></canvas>
+    <div id="load">강아지 불러오는 중…</div>
+    <div id="over"><div class="card" id="card"></div></div>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var cv = document.getElementById('cv'), ctx = cv.getContext('2d'), stage = document.getElementById('stage'), vids = document.getElementById('vids');
+  var OL = '#3b2a22', BEST_KEY = 'kungkung.real.best';
+  var Q = new URLSearchParams(location.search);
+
+  /* ---------------- 클립 구간 (초): 영상 프레임을 보고 정한 값 ---------------- */
+  var END = 5.04;
+  var CLIP = {
+    press: { ready: [0.7, 1.4], approach: [1.4, 2.5], pressed: [2.5, 3.3], back: [3.9, END], boop: [4.05, END] },   // 킁킁 → 코가 다가와 렌즈를 덮음 → 유리에 꾹 → 물러남
+    lick: { lick: [2.0, END] }   // 2.17~2.5 혀가 렌즈를 쓱, 3.0~3.8 입술 할짝, 5.0 기준 자세
+  };
+  var NOSE = { x: 0.51, y: 0.40 };   // 기준 프레임에서 코의 자리 (화면 비율)
+
+  /* ---------------- 시드 난수 ---------------- */
+  function mulberry(a) { return function () { a = (a + 0x6D2B79F5) >>> 0; var t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  var sp = Q.get('seed'), rnd = mulberry(sp && /^\d+$/.test(sp) ? +sp : (Date.now() & 0xffffffff)), FX = Math.random;
+
+  /* ---------------- 레이아웃 ---------------- */
+  var s = 1, dpr = 1, Wl = 390, Hl = 760, floorY = 590;
+  function resize() {
+    var r = stage.getBoundingClientRect(); if (r.width < 10 || r.height < 10) return;
+    dpr = Math.min(2, window.devicePixelRatio || 1); s = Math.min(r.width / 390, r.height / 700);
+    Wl = r.width / s; Hl = r.height / s; floorY = Hl * 0.82;
+    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+    var k = Math.max(r.width / 720, r.height / 1280); VB.w = 720 * k / s; VB.h = 1280 * k / s; VB.x = (Wl - VB.w) / 2; VB.y = (Hl - VB.h) / 2;
+    vids.style.left = (VB.x * s) + 'px'; vids.style.top = (VB.y * s) + 'px'; vids.style.width = (VB.w * s) + 'px'; vids.style.height = (VB.h * s) + 'px';
+    if (G) G.cookie.x = clampX(G.cookie.x);
+  }
+  var VB = { x: 0, y: 0, w: 390, h: 693 };   // 영상 층 상자 (논리 px)
+  function noseX0() { return VB.x + VB.w * NOSE.x; }
+  function noseY0() { return VB.y + VB.h * NOSE.y; }
+  function clampX(x) { return Math.max(46, Math.min(Wl - 46, x)); }
+  function cookieY() { return floorY + 22; }
+
+  /* ---------------- 영상 층 ---------------- */
+  var V = { base: document.getElementById('v_base'), sniff: document.getElementById('v_sniff'), press: document.getElementById('v_press'), lick: document.getElementById('v_lick') };
+  var cur = 'base', seg = null;   // seg: { v, to, rate, then }
+  function show(name) { if (cur === name) return; V[cur].classList.remove('on'); V[name].classList.add('on'); if (cur !== 'base' && V[cur].pause) V[cur].pause(); cur = name; }
+  /** 클립의 [from, to] 구간을 정해진 시간(dur초)에 맞춰 재생 */
+  function playSeg(name, from, to, dur, then) {
+    var v = V[name]; try { v.currentTime = from; } catch (e) { /* 무시 */ }
+    v.playbackRate = Math.max(0.25, Math.min(4, (to - from) / dur));
+    var p = v.play(); if (p && p.catch) p.catch(function () { /* 무시 */ });
+    show(name); seg = { name: name, to: to, then: then };
+  }
+  function idle() { seg = null; var v = V.sniff; v.playbackRate = 1; try { v.currentTime = 0; } catch (e) { /* 무시 */ } var p = v.play(); if (p && p.catch) p.catch(function () { /* 무시 */ }); show('sniff'); }
+  function tickVideo() { if (!seg) return; var v = V[seg.name]; if (v.currentTime >= seg.to - 0.03 || v.ended) { var f = seg.then; seg = null; if (f) f(); else v.pause(); } }
+  var ready = 0, loadEl = document.getElementById('load');
+  function checkReady() {   // 이벤트는 스크립트보다 먼저 지나갈 수 있어 매 프레임 상태를 직접 셈
+    var n = 0; ['sniff', 'press', 'lick'].forEach(function (k) { if (V[k].readyState >= 2) n++; });
+    if (n !== ready) { ready = n; if (ready === 3) loadEl.style.display = 'none'; }
+  }
+
+  /* ---------------- 상태 ---------------- */
+  var G = null;
+  var RULE = { HIT_R: 62, CLOSE: 26, WINDUP: 0.6, BOOP_Q0: 0.45 };
+  function loadBest() { try { return +(localStorage.getItem(BEST_KEY) || 0); } catch (e) { return 0; } }
+  function saveBest(v) { try { localStorage.setItem(BEST_KEY, String(v)); } catch (e) { /* 무시 */ } }
+  function newGame(started) {
+    G = { state: started ? 'play' : 'title', t: 0, play: 0, score: 0, hearts: 3, combo: 0, best: loadBest(), dodges: 0, boops: 0, prints: [], printCount: 0,
+      cookie: { x: Wl / 2, tx: Wl / 2, wet: 0, scared: 0, run: 0, inv: 0 }, atk: null, nextAtk: 2.0, pops: [], fx: [], shake: 0, shot: null, endT: null, shift: 0, shiftY: 0, zoom: 1, huh: 0 };
+    hideOver(); idle();
+  }
+
+  /* ---------------- 소리·진동 ---------------- */
+  var AC = null;
+  function audio() { try { if (!AC) { AC = new (window.AudioContext || window.webkitAudioContext)(); var b = AC.createBuffer(1, 1, 22050), src = AC.createBufferSource(); src.buffer = b; src.connect(AC.destination); src.start(0); } if (AC.state !== 'running') AC.resume(); } catch (e) { AC = null; } }
+  ['pointerup', 'touchend', 'click'].forEach(function (t) { document.addEventListener(t, audio, { passive: true }); });
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  function tone(type, f0, f1, dur, vol, delay) { if (!AC) return; try { var t = AC.currentTime + (delay || 0), o = AC.createOscillator(), g = AC.createGain(); o.type = type; o.frequency.setValueAtTime(f0, t); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(AC.destination); o.start(t); o.stop(t + dur + 0.02); } catch (e) { /* 무시 */ } }
+  function noise(dur, vol, freq, type, delay) { if (!AC) return; try { var n = Math.floor(AC.sampleRate * dur), b = AC.createBuffer(1, n, AC.sampleRate), d = b.getChannelData(0); for (var i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 1.5); var src = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain(); src.buffer = b; f.type = type || 'lowpass'; f.frequency.value = freq || 900; g.gain.value = vol; src.connect(f); f.connect(g); g.connect(AC.destination); src.start(AC.currentTime + (delay || 0)); } catch (e) { /* 무시 */ } }
+  var SND = {
+    sniff: function () { noise(0.09, 0.22, 1800, 'bandpass'); noise(0.09, 0.22, 2100, 'bandpass', 0.14); },
+    whoosh: function () { noise(0.25, 0.18, 900, 'lowpass'); },
+    bonk: function () { tone('sine', 180, 70, 0.22, 0.45); noise(0.08, 0.2, 2600, 'bandpass'); },
+    dodge: function (c) { var f = [523, 587, 659, 784, 880, 988][Math.min(5, c)]; tone('triangle', f, 0, 0.14, 0.2); },
+    close: function () { tone('sine', 880, 1320, 0.12, 0.18); },
+    lick: function () { noise(0.5, 0.3, 600, 'bandpass'); tone('sine', 300, 180, 0.3, 0.2); },
+    boop: function () { tone('sine', 700, 1500, 0.08, 0.3); noise(0.3, 0.3, 3000, 'highpass', 0.12); },
+    huh: function () { tone('sine', 400, 620, 0.18, 0.12); },
+    over: function () { [523, 440, 349].forEach(function (f, i) { tone('triangle', f, 0, 0.25, 0.16, i * 0.15); }); }
+  };
+  function buzz(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* 무시 */ } }
+
+  /* ---------------- 입력 ---------------- */
+  function toL(e) { var r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s }; }
+  var drags = {};
+  cv.addEventListener('pointerdown', function (e) {
+    audio(); var p = toL(e);
+    if (G.state === 'title') { if (ready < 3) return; newGame(true); G.cookie.tx = clampX(p.x); drags[e.pointerId] = true; try { cv.setPointerCapture(e.pointerId); } catch (er) { /* 무시 */ } return; }
+    if (G.state !== 'play') return;
+    try { cv.setPointerCapture(e.pointerId); } catch (er) { /* 무시 */ }
+    if (tryBoop(p)) return;
+    if (p.y >= floorY - 70) { drags[e.pointerId] = true; G.cookie.tx = clampX(p.x); }
+  });
+  cv.addEventListener('pointermove', function (e) { if (!drags[e.pointerId] || !G || G.state !== 'play') return; G.cookie.tx = clampX(toL(e).x); });
+  function endP(e) { delete drags[e.pointerId]; }
+  cv.addEventListener('pointerup', endP); cv.addEventListener('pointercancel', endP);
+
+  /* ---------------- 코 자리 (영상 층 이동과 같은 계산) ---------------- */
+  function nosePose() {
+    var a = G.atk, q = a && a.phase === 'lunge' ? Math.min(1, a.t / a.dur) : a && (a.phase === 'impact') ? 1 : 0;
+    var e = q * q * (3 - 2 * q), tx = a ? a.lockX || a.tx : Wl / 2;
+    return { x: noseX0() + G.shift, y: noseY0() + VB.h * 0.1 * e + G.shiftY, r: 38 + 170 * e, q: q, tx: tx };
+  }
+  function tryBoop(p) {
+    var a = G.atk; if (!a || a.phase !== 'lunge' || G.endT != null) return false;
+    var n = nosePose(); if (n.q < RULE.BOOP_Q0 || Math.hypot(p.x - n.x, p.y - n.y) > n.r * 1.3) return false;
+    a.phase = 'boop'; G.boops++; G.combo++; G.score += 30;
+    pop('에취!', n.x, n.y - n.r - 10, 34, '#ffffff'); pop('+30', n.x + 50, n.y, 22, '#ffd23f'); SND.boop(); buzz([15, 30, 15]); G.shake = 6;
+    for (var i = 0; i < 14; i++) G.fx.push({ x: n.x + (FX() - 0.5) * n.r, y: n.y, vx: (FX() - 0.5) * 260, vy: 60 + FX() * 160, t: 0, life: 0.7, r: 4 + FX() * 6 });
+    playSeg('press', CLIP.press.boop[0], CLIP.press.boop[1], 0.6, endAttack);
+    return true;
+  }
+
+  /* ---------------- 공격: 킁킁(흰 원) → 잠금(빨강)·돌진(영상 코가 다가옴) → 쿵 → 피함/날름 ---------------- */
+  function interval() { return Math.max(0.8, 1.7 - G.play * 0.022); }
+  function lungeTime() { return Math.max(0.32, 0.5 - G.play * 0.003); }
+  function startAttack() {
+    G.atk = { phase: 'windup', t: 0, tx: G.cookie.x, lockX: null, dur: RULE.WINDUP, nextIv: interval() * (0.75 + rnd() * 0.5) };
+    SND.sniff(); pop('킁킁', Wl * 0.75, Hl * NOSE.y, 28, '#ffffff');
+    playSeg('press', CLIP.press.ready[0], CLIP.press.ready[1], RULE.WINDUP, null);   // 킁킁: 돌진 직전까지 → 돌진이 끊김 없이 이어짐
+  }
+  function endAttack() { var a = G.atk; G.atk = null; G.nextAtk = a ? a.nextIv : 1.5; idle(); }
+  function updateAttack(dt) {
+    var a = G.atk, C = G.cookie;
+    if (!a) { G.nextAtk -= dt; if (G.nextAtk <= 0 && G.endT == null) startAttack(); G.shift += (((C.x - Wl / 2) * 0.06) - G.shift) * Math.min(1, dt * 3); return; }
+    a.t += dt;
+    if (a.phase === 'windup') {
+      a.tx += (C.x - a.tx) * Math.min(1, dt * 7);
+      G.shift += (((a.tx - Wl / 2) * 0.12) - G.shift) * Math.min(1, dt * 5);
+      if (a.t >= a.dur) {   // 잠금 → 돌진: press 클립의 '다가옴' 구간을 돌진 시간에 맞춰 재생
+        a.phase = 'lunge'; a.t = 0; a.lockX = a.tx; a.dur = lungeTime(); a.shift0 = G.shift; SND.whoosh();
+        playSeg('press', CLIP.press.approach[0], CLIP.press.approach[1], a.dur, null);
+      }
+    } else if (a.phase === 'lunge') {
+      var q = Math.min(1, a.t / a.dur), e = q * q * (3 - 2 * q);
+      G.shift = a.shift0 + ((a.lockX - noseX0()) - a.shift0) * e;   // 영상 층을 밀어 코가 목표 위로
+      G.shiftY = Hl * 0.1 * e; G.zoom = 1 + 0.1 * e;
+      if (q >= 1) impact();
+    } else if (a.phase === 'impact') {
+      if (a.t >= 0.25 && !a.leaving) { a.leaving = true; leave(); }
+    }
+  }
+  function impact() {
+    var a = G.atk, C = G.cookie, dist = Math.abs(C.x - a.lockX), hit = dist < RULE.HIT_R && C.inv <= 0, n = nosePose();
+    a.phase = 'impact'; a.t = 0; a.caught = hit; seg = { name: 'press', to: CLIP.press.pressed[1], then: null }; V.press.playbackRate = 1;   // 유리에 꾹 눌린 채 킁킁
+    G.prints.push({ x: n.x, y: n.y, r: n.r * 0.7, t: 0, life: 5 }); G.printCount++;
+    G.shake = 9; SND.bonk(); buzz(30);
+    if (hit) {
+      G.hearts--; G.combo = 0; C.wet = 1.6; C.inv = 1.0;
+      pop('날름!', C.x, cookieY() - 80, 40, '#ff7aa2'); SND.lick(); buzz([40, 30, 60]);
+      if (G.hearts <= 0) G.endT = 2.0;
+    } else {
+      G.dodges++; G.combo++;
+      var close = dist < RULE.HIT_R + RULE.CLOSE, pts = 10 + Math.min(40, (G.combo - 1) * 2) + (close ? 15 : 0);
+      G.score += pts; pop(close ? '아슬!' : '+' + pts, C.x, cookieY() - 70, close ? 30 : 24, close ? '#ffd23f' : '#ffffff');
+      if (close) SND.close(); else SND.dodge(G.combo);
+      G.huh = 0.9; setTimeout(SND.huh, 160);
+    }
+  }
+  function leave() {   // 피했으면 press 클립의 물러나는 구간, 잡혔으면 lick 클립
+    var a = G.atk;
+    if (a.caught) { playSeg('lick', CLIP.lick.lick[0], CLIP.lick.lick[1], 2.2, endAttack); setTimeout(function () { if (!G.shot) snapShot(); }, 260); }
+    else playSeg('press', CLIP.press.back[0], CLIP.press.back[1], 0.95, endAttack);
+  }
+  function pop(text, x, y, size, color) { G.pops.push({ text: text, x: x, y: y, size: size, color: color, t: 0, life: 1.0 }); }
+  /** 날름당한 순간 한 컷: 지금 영상 프레임 + 위 그림을 합쳐 찍음 */
+  function snapShot() {
+    try {
+      var k = 0.5, W = Math.round(cv.width * k), H = Math.round(cv.height * k), c3 = document.createElement('canvas'); c3.width = W; c3.height = H;
+      var x3 = c3.getContext('2d'), v = V[cur], vw = v.videoWidth || v.naturalWidth, vh = v.videoHeight || v.naturalHeight, px = s * dpr * k;
+      var bw = VB.w * px * G.zoom, bh = VB.h * px * G.zoom, ox = (VB.x + VB.w * 0.51) * px, oy = (VB.y + VB.h * 0.4) * px;   // 화면과 같은 변환 (코 중심 확대)
+      x3.fillStyle = '#6fa8e8'; x3.fillRect(0, 0, W, H);
+      x3.drawImage(v, ox - VB.w * 0.51 * px * G.zoom + G.shift * px, oy - VB.h * 0.4 * px * G.zoom + G.shiftY * px, bw, bh);
+      x3.drawImage(cv, 0, 0, W, H);
+      var c2 = document.createElement('canvas'), w = 300, h = 420, sh = Math.min(H, W * 1.4), sy = Math.max(0, Math.min(H - sh, H * 0.55 - sh / 2)); c2.width = w; c2.height = h;
+      c2.getContext('2d').drawImage(c3, 0, sy, W, sh, 0, 0, w, h);
+      G.shot = c2.toDataURL('image/jpeg', 0.8);
+    } catch (e) { G.shot = null; }
+  }
+
+  /* ---------------- 진행 ---------------- */
+  function update(dt) {
+    G.t += dt; var C = G.cookie;
+    G.shake *= Math.exp(-dt * 10); G.huh = Math.max(0, G.huh - dt);
+    var ox = C.x; C.x += (C.tx - C.x) * Math.min(1, dt * 18); C.run = (C.x - ox) / Math.max(dt, 0.001);
+    C.wet = Math.max(0, C.wet - dt); C.inv = Math.max(0, C.inv - dt);
+    var a = G.atk; C.scared = a && (a.phase === 'windup' || a.phase === 'lunge') && Math.abs(C.x - (a.lockX != null ? a.lockX : a.tx)) < RULE.HIT_R + 20 ? 1 : 0;
+    if (!a || a.phase === 'windup') { G.zoom += (1 - G.zoom) * Math.min(1, dt * 6); G.shiftY += (0 - G.shiftY) * Math.min(1, dt * 6); }
+    G.prints = G.prints.filter(function (p) { p.t += dt; return p.t < p.life; });
+    G.fx = G.fx.filter(function (p) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 120 * dt; return p.t < p.life; });
+    G.pops = G.pops.filter(function (p) { p.t += dt; return p.t < p.life; });
+    tickVideo();
+    if (G.state === 'play') {
+      G.play += dt; updateAttack(dt);
+      if (G.endT != null) { G.endT -= dt; if (G.endT <= 0) gameOver(); }
+    } else if (G.state === 'title') { C.tx = Wl / 2 + Math.sin(G.t * 1.3) * Wl * 0.25; G.shift += (((C.x - Wl / 2) * 0.06) - G.shift) * Math.min(1, dt * 3); }
+    var shx = (FX() - 0.5) * G.shake * 2, shy = (FX() - 0.5) * G.shake * 2;
+    // 영상을 민 만큼 코 중심으로 확대해 가장자리가 화면에 드러나지 않게 (다가올수록 커지는 느낌도 덤)
+    var zx = (Wl + 2 * (Math.abs(G.shift) + 8)) / VB.w, zy = 1 + Math.max(0, G.shiftY + 6) / (VB.h * 0.4 + VB.y);
+    G.zoom = Math.max(G.zoom, zx, zy);
+    vids.style.transform = 'translate(' + ((G.shift + shx) * s).toFixed(1) + 'px,' + ((G.shiftY + shy) * s).toFixed(1) + 'px) scale(' + G.zoom.toFixed(3) + ')';
+  }
+  function gameOver() {
+    G.state = 'over'; G.endT = null; SND.over();
+    var isBest = G.score > G.best; if (isBest) { G.best = G.score; saveBest(G.score); }
+    document.getElementById('card').innerHTML = '<h2>날름당했어요!</h2>' + (G.shot ? '<img class="shot" alt="날름당한 순간" src="' + G.shot + '">' : '') +
+      '<div class="big">' + G.score + '</div><div class="sub">' + (isBest ? '최고 기록!' : '최고 ' + G.best) + '<br>피함 ' + G.dodges + ' · 코 톡 ' + G.boops + ' · 코 도장 ' + G.printCount + '개</div>' +
+      '<div class="row"><button class="pill main" aria-label="다시">↻ 다시</button></div>';
+    document.getElementById('over').classList.add('show');
+  }
+  function hideOver() { document.getElementById('over').classList.remove('show'); document.getElementById('card').innerHTML = ''; }
+  document.getElementById('over').addEventListener('click', function (e) { if (!e.target.closest('button')) return; audio(); newGame(true); });
+
+  /* ---------------- 그리기 (영상 위 투명 캔버스) ---------------- */
+  function drawText(t, x, y, size, color, align) { ctx.font = size + 'px Jua, sans-serif'; ctx.textAlign = align || 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'; ctx.lineWidth = size * 0.26; ctx.strokeStyle = OL; ctx.strokeText(t, x, y); ctx.fillStyle = color; ctx.fillText(t, x, y); }
+  function drawCookie() {
+    var C = G.cookie, x = C.x, y = cookieY(), run = Math.max(-1, Math.min(1, C.run / 900));
+    ctx.save(); ctx.translate(x, y); ctx.rotate(run * 0.25); if (C.inv > 0 && Math.floor(G.t * 16) % 2) ctx.globalAlpha = 0.5;
+    ctx.fillStyle = OL; [[-30, -9], [-30, 9], [30, -9], [30, 9]].forEach(function (p) { ctx.beginPath(); ctx.arc(p[0], p[1], 14, 0, Math.PI * 2); ctx.fill(); }); ctx.fillRect(-32, -12, 64, 24);
+    ctx.fillStyle = C.wet > 0 ? '#e8c18d' : '#e9b56a'; [[-30, -9], [-30, 9], [30, -9], [30, 9]].forEach(function (p) { ctx.beginPath(); ctx.arc(p[0], p[1], 11.5, 0, Math.PI * 2); ctx.fill(); }); ctx.fillRect(-31, -9.5, 62, 19);
+    ctx.fillStyle = OL; [-8, 8].forEach(function (ex) { ctx.beginPath(); if (C.scared) ctx.ellipse(ex, -1, 3.2, 4.2, 0, 0, Math.PI * 2); else ctx.arc(ex, -1, 2.6, 0, Math.PI * 2); ctx.fill(); });
+    ctx.strokeStyle = OL; ctx.lineWidth = 2; ctx.beginPath(); if (C.scared) { ctx.ellipse(0, 6, 3, 3.5, 0, 0, Math.PI * 2); } else { ctx.moveTo(-4, 5); ctx.quadraticCurveTo(0, 9, 4, 5); } ctx.stroke();
+    if (C.wet > 0) { ctx.fillStyle = 'rgba(140,200,255,0.85)'; [[-22, -18], [18, -16], [0, -22]].forEach(function (p, i) { var yy = p[1] + ((G.t * 30 + i * 7) % 14); ctx.beginPath(); ctx.arc(p[0], yy, 3.5, 0, Math.PI * 2); ctx.fill(); }); }
+    ctx.restore();
+  }
+  function render() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); ctx.setTransform(dpr * s, 0, 0, dpr * s, 0, 0);
+    // 바닥: 나무 상자 모서리 (강아지 다리는 이 뒤로)
+    ctx.fillStyle = '#d9b48a'; ctx.beginPath(); ctx.moveTo(-30, floorY); ctx.quadraticCurveTo(Wl / 2, floorY - 14, Wl + 30, floorY); ctx.lineTo(Wl + 30, Hl + 30); ctx.lineTo(-30, Hl + 30); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#e8c9a2'; ctx.beginPath(); ctx.moveTo(-30, floorY); ctx.quadraticCurveTo(Wl / 2, floorY - 14, Wl + 30, floorY); ctx.lineTo(Wl + 30, floorY + 10); ctx.quadraticCurveTo(Wl / 2, floorY - 4, -30, floorY + 10); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(150,100,60,0.35)'; ctx.lineWidth = 2; for (var gr = 0; gr < 4; gr++) { ctx.beginPath(); ctx.moveTo(-30, floorY + 30 + gr * 28); ctx.quadraticCurveTo(Wl / 2, floorY + 18 + gr * 28, Wl + 30, floorY + 30 + gr * 28); ctx.stroke(); }
+    var a = G.atk;
+    if (a && (a.phase === 'windup' || a.phase === 'lunge')) {
+      var tx = a.phase === 'lunge' ? a.lockX : a.tx, red = a.phase === 'lunge', y = cookieY() + 4;
+      ctx.fillStyle = red ? 'rgba(255,90,90,0.32)' : 'rgba(60,40,40,0.24)'; ctx.beginPath(); ctx.ellipse(tx, y, RULE.HIT_R, 16, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = red ? 'rgba(255,90,90,0.9)' : 'rgba(255,255,255,0.85)'; ctx.lineWidth = 3; ctx.setLineDash([8, 6]); ctx.beginPath(); ctx.ellipse(tx, y, RULE.HIT_R, 16, 0, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    }
+    drawCookie();
+    G.fx.forEach(function (p) { ctx.fillStyle = 'rgba(255,255,255,' + (1 - p.t / p.life) * 0.8 + ')'; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); });
+    G.prints.forEach(function (p) {   // 유리에 남은 코 김서림
+      var al = Math.max(0, 1 - p.t / p.life) * Math.min(1, p.t / 0.6) * 0.5; if (al <= 0) return;
+      var g = ctx.createRadialGradient(p.x, p.y, p.r * 0.2, p.x, p.y, p.r); g.addColorStop(0, 'rgba(255,255,255,' + al * 0.7 + ')'); g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(p.x, p.y, p.r * 1.1, p.r * 0.85, 0, 0, Math.PI * 2); ctx.fill();
+    });
+    if (G.huh > 0) { ctx.save(); ctx.globalAlpha = Math.min(1, G.huh * 2); drawText('??', Wl * 0.78, Hl * 0.16, 36, '#ffffff'); ctx.restore(); }
+    G.pops.forEach(function (p) { var q = p.t / p.life, sc = q < 0.15 ? 0.6 + q / 0.15 * 0.6 : 1.2 - Math.min(0.2, q - 0.15); ctx.save(); ctx.globalAlpha = q > 0.75 ? (1 - q) / 0.25 : 1; ctx.translate(p.x, p.y - q * 30); ctx.scale(sc, sc); drawText(p.text, 0, 0, p.size, p.color); ctx.restore(); });
+    if (G.state !== 'title') {
+      for (var i = 0; i < 3; i++) { ctx.save(); ctx.translate(26 + i * 34, 34); ctx.fillStyle = i < G.hearts ? '#ff6b8b' : 'rgba(255,255,255,0.4)'; ctx.strokeStyle = OL; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(0, 9); ctx.bezierCurveTo(-16, -2, -9, -15, 0, -6); ctx.bezierCurveTo(9, -15, 16, -2, 0, 9); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore(); }
+      drawText(String(G.score), Wl - 18, 36, 34, '#ffffff', 'right');
+      if (G.combo >= 2) drawText(G.combo + '연속', Wl - 18, 66, 18, '#ffd23f', 'right');
+    } else {
+      drawText('킁킁!', Wl / 2, Hl * 0.08, 60, '#ffffff');
+      if (G.best) drawText('최고 ' + G.best, Wl / 2, Hl * 0.08 + 44, 18, '#ffd23f');
+      drawText(ready < 3 ? '강아지 불러오는 중…' : '쿠키를 끌어서 코를 피해요', Wl / 2, floorY + 0.5 * (Hl - floorY) + 10, 22, '#ffffff');
+    }
+  }
+
+  /* ---------------- 루프 ---------------- */
+  var last = performance.now();
+  function frame(now) { requestAnimationFrame(frame); checkReady(); var dt = Math.min(0.05, (now - last) / 1000); last = now; if (G) { update(dt); render(); } }
+  window.addEventListener('resize', resize); if (window.ResizeObserver) new ResizeObserver(resize).observe(stage);
+
+  /* ---------------- 읽기 전용 관찰 창 ---------------- */
+  function toClient(x, y) { var r = cv.getBoundingClientRect(); return { x: Math.round(r.left + x * s), y: Math.round(r.top + y * s) }; }
+  window.kung = { snapshot: function () {
+    var a = G.atk, n = nosePose(), cn = toClient(n.x, n.y), tx = a ? (a.lockX != null ? a.lockX : a.tx) : null;
+    return { state: G.state, t: +G.play.toFixed(2), score: G.score, hearts: G.hearts, combo: G.combo, dodges: G.dodges, boops: G.boops, prints: G.printCount, best: G.best, ready: ready,
+      clip: cur, clipT: +(+V[cur].currentTime || 0).toFixed(2), rate: V[cur].playbackRate || 0, shift: Math.round(G.shift), vids: ['sniff', 'press', 'lick'].map(function (k) { return V[k].currentSrc.split('/').pop(); }),
+      cookie: { x: Math.round(G.cookie.x), sx: toClient(G.cookie.x, 0).x }, atk: a ? { phase: a.phase, t: +a.t.toFixed(3), tx: tx == null ? null : Math.round(tx), stx: tx == null ? null : toClient(tx, 0).x, color: a.phase === 'lunge' ? 'red' : 'white' } : null,
+      nose: { sx: cn.x, sy: cn.y, r: Math.round(n.r * s) }, over: document.getElementById('over').classList.contains('show'), shot: !!G.shot };
+  } };
+
+  resize(); newGame(false); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
