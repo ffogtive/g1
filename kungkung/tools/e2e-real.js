@@ -73,6 +73,21 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
       snap: () => page.evaluate(() => window.kung.snapshot()),
       waitFor: (src, to = 15000) => page.evaluate(([src, to]) => new Promise(res => { const f = new Function('q', 'return ' + src); const t0 = performance.now(); (function loop() { const q = window.kung.snapshot(); if (f(q)) return res(q); if (performance.now() - t0 > to) return res(null); requestAnimationFrame(loop); })(); }), [src, to]) };
     T.tap = async (x, y) => { await T.touch('touchStart', x, y); await T.touch('touchEnd'); };
+    /** 조건이 되는 그 프레임에 페이지 안에서 바로 톡 (같은 pointerdown 처리기). target: 'nose' | 'cookie' */
+    T.tapWhen = (cond, target, to = 10000) => page.evaluate(([cond, target, to]) => new Promise(res => {
+      const f = new Function('q', 'return ' + cond), t0 = performance.now();
+      (function loop() {
+        const q = window.kung.snapshot();
+        if (f(q)) {
+          const p = target === 'nose' ? { x: q.nose.sx, y: q.nose.sy } : { x: q.cookie.sx, y: q.cookie.sy }, cv = document.getElementById('cv');
+          const o = { clientX: p.x, clientY: p.y, pointerId: 77, pointerType: 'touch', isPrimary: false, bubbles: true };
+          cv.dispatchEvent(new PointerEvent('pointerdown', o)); cv.dispatchEvent(new PointerEvent('pointerup', o));
+          return res(q);
+        }
+        if (performance.now() - t0 > to) return res(null);
+        requestAnimationFrame(loop);
+      })();
+    }), [cond, target, to]);
     T.press = async (x = 195, y = 760) => { if (T.down) await T.touch('touchEnd'); await T.touch('touchStart', x, y); T.fx = x; T.fy = y; T.down = true; };
     T.lift = async () => { if (T.down) await T.touch('touchEnd'); T.down = false; };
     /** 손가락을 (dx, dy)만큼 n번에 나눠 끔 (상대 끌기). 화면 밖으로 나가면 떼고 아래 가운데에 다시 댐 (쿠키는 그대로) */
@@ -308,8 +323,7 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
         q && JSON.stringify({ t: [q.t, q2.t], clipT: [q.clipT, q2.clipT], cx: [q.cookie.x, q2.cookie.x] }));
       await T.close();
       const T2 = await open(P + 'seed=52&pat=kung'); await T2.start(); await T2.lift();
-      const q3 = await T2.waitFor('q.atk && q.atk.step === "lunge" && q.atk.t > q.atk.dur * 0.6', 10000);
-      if (q3) await T2.tap(q3.cookie.sx, q3.cookie.sy);
+      const q3 = await T2.tapWhen('q.atk && q.atk.step === "lunge" && q.atk.t > q.atk.dur * 0.6', 'cookie');
       const q4 = await T2.snap();
       ok(`${tag} 톡 시간 창 안이라도 쿠키를 누르면 끌기 (톡 아님)`, q3 && q4.boops === 0, q3 && JSON.stringify({ cookie: [q3.cookie.sx, q3.cookie.sy], nose: [q3.nose.sx, q3.nose.sy] }));
       await T2.close();
@@ -317,9 +331,8 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
     /* ---------- 10. 코 톡 (앞줄 +30, 크게 +50, 뒷줄 +45) → 그 자리에서 고개 듦 → 재채기 클립 ---------- */
     for (const [pat, cell, pts] of [['kung', 'F1', 30], ['big', 'F1', 50], ['kung', 'B1', 45]]) {
       const T = await open(P + 'seed=51&pat=' + pat); await T.start(); await T.toCell(cell); await T.lift();
-      const q = await T.waitFor('q.atk && q.atk.step === "lunge" && q.atk.phase === "lunge" && q.atk.t > q.atk.dur * 0.6', 10000);
+      const q = await T.tapWhen('q.atk && q.atk.step === "lunge" && q.atk.phase === "lunge" && q.atk.t > q.atk.dur * 0.6', 'nose');
       const sb = q ? q.score : 0;
-      if (q) await T.tap(q.nose.sx, q.nose.sy);
       const qa = await T.waitFor('q.boops === 1', 800);
       const qz = await T.waitFor('q.clip.indexOf("sneeze") >= 0', 2500);
       await T.page.screenshot({ path: `${OUT}/${SP}-boop-${pat}-${cell}.png` });
@@ -330,8 +343,7 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
     {
       const T = await open(P + 'seed=53&pat=kung'); await T.start(); await T.toCell('B0');
       await T.waitFor('q.atk && q.atk.step === "lunge" && q.atk.cell === "B0" && q.atk.t > q.atk.dur * 0.3', 10000); await T.go(0, 1); await T.lift();
-      const q = await T.waitFor('q.atk && q.atk.step === "lunge" && q.atk.t > q.atk.dur * 0.62', 3000);
-      if (q) await T.tap(q.nose.sx, q.nose.sy);
+      const q = await T.tapWhen('q.atk && q.atk.step === "lunge" && q.atk.t > q.atk.dur * 0.62', 'nose', 3000);
       const qa = await T.waitFor('q.boops === 1', 800);
       ok(`${tag} 뒷줄 B0 앙: 쿠키를 B1로 비킨 뒤 코 가운데 톡 → +45 (쿠키 근처만 끌기 우선)`, !!qa && qa.score >= 45, q && JSON.stringify({ nose: [q.nose.sx, q.nose.sy, q.nose.r], cookie: [q.cookie.sx, q.cookie.sy], score: qa && qa.score }));
       await T.close();
