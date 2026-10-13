@@ -104,6 +104,8 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
     await page.evaluate(() => { window.__clips = []; (function loop() { const q = window.kung.snapshot(); const l = window.__clips[window.__clips.length - 1]; const k = q.clip + (q.mir ? '~' : ''); if (!l || l !== k) window.__clips.push(k); requestAnimationFrame(loop); })(); });
     return T;
   }
+  /** 두 손가락 터치 (CDP touchPoints 여러 개) */
+  async function cdp2(T, pts, type) { const s = await T.ctx.newCDPSession(T.page); await s.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((p, i) => ({ x: p.x, y: p.y, id: i })) }); }
   /** 자동 피하기: 빨간 구간이 쿠키 줄에 걸리면 가장 가까운 안전한 (X, 줄)로 (대각선 허용) */
   async function autoDodge(T, until, maxMs) {
     const t0 = Date.now(); let q;
@@ -170,6 +172,29 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
       const qd = await T.waitFor(`q.cookie.rowT === 1 && Math.abs(q.cookie.X - q.cookie.tX) < 0.06`, 1500), pm = await T.page.evaluate(() => window.__pm);
       const after = qd ? (qd.now - pm[pm.length - 1]) / 1000 : 9;   // 마지막 손가락 움직임 → 줄도 옆도 도착
       ok(`${tag} 대각선: 45° 쓸기(68×65px)로 폴짝 + 옆 0.65칸이 함께, 쓸기가 끝나고 0.16초 안에 도착`, qd && qd.cookie.row === 1 && qd.cookie.X - X0 > 0.55 && after < 0.16, qd && JSON.stringify({ X: [X0, qd.cookie.X], swipeMs: Math.round(pm[pm.length - 1] - pm[0]), afterMs: Math.round(after * 1000) }));
+      // 리뷰 회귀 ①: 엄지 호 — 앞줄 끝에서 끝까지(298px) 1초에 천천히 끌며 63px 뜸(약 12°) → 폴짝 0회
+      await T.press(70, 780); await T.go(-1.42, 0); await T.press(60, 790);
+      const hs0 = (await T.snap()).hops;
+      for (let i = 1; i <= 30; i++) { await T.touch('touchMove', 60 + 298 * i / 30, 790 - 63 * Math.sin(Math.PI / 2 * i / 30)); await T.page.waitForTimeout(33); }
+      T.fx = 358; T.fy = 727; await T.page.waitForTimeout(120);
+      const qa = await T.snap();
+      ok(`${tag} 엄지 호: 끝에서 끝까지 천천히 끌며 63px 떠도(12°) 폴짝 0회`, qa.hops === hs0 && qa.cookie.row === 0, JSON.stringify({ hops: [hs0, qa.hops], X: qa.cookie.X }));
+      // 리뷰 회귀 ②: 옆으로 빠르게 피한 직후(160px / 0.2초) 위로 25px 튕기면 바로 폴짝
+      await T.press(330, 780);
+      for (let i = 1; i <= 8; i++) { await T.touch('touchMove', 330 - 20 * i, 780); await T.page.waitForTimeout(25); }
+      for (let i = 1; i <= 2; i++) { await T.touch('touchMove', 170, 780 - 12.5 * i); await T.page.waitForTimeout(12); }
+      T.fx = 170; T.fy = 755; await T.page.waitForTimeout(160);
+      const qb2 = await T.snap();
+      ok(`${tag} 옆으로 피한 직후 위로 25px 튕김 → 폴짝`, qb2.cookie.row === 1, JSON.stringify({ row: qb2.cookie.row, hops: qb2.hops }));
+      // 리뷰 회귀 ③: 두 번째 손가락은 끌기가 아님 (첫 손가락만)
+      await T.lift(); await T.press(195, 780); const xm0 = (await T.snap()).cookie.tX;
+      await cdp2(T, [{ x: 195, y: 780 }, { x: 300, y: 790 }], 'touchStart');
+      await cdp2(T, [{ x: 195, y: 780 }, { x: 360, y: 790 }], 'touchMove');
+      await cdp2(T, [{ x: 195, y: 780 }, { x: 380, y: 790 }], 'touchMove');
+      await T.page.waitForTimeout(100);
+      const qm2 = await T.snap();
+      ok(`${tag} 멀티터치: 두 번째 손가락을 끌어도 쿠키는 그대로`, Math.abs(qm2.cookie.tX - xm0) < 0.02, JSON.stringify({ tX: [xm0, qm2.cookie.tX] }));
+      await T.touch('touchEnd'); T.down = false;
       await T.close();
     }
     /* ---------- 4. 패턴별: 가만히 → 물림 / 빨간 구간 밖으로 → 다 피함 ---------- */
@@ -280,6 +305,15 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
       await T.page.screenshot({ path: `${OUT}/${SP}-boop-${pat}-${cell}.png` });
       const clips = await T.page.evaluate(() => window.__clips);
       ok(`${tag} ${pat} ${cell}: 앙 후반 코 톡 → +${pts}, 고개 듦 → 재채기 클립`, qa && qa.score === sb + pts && !!qz, qa && JSON.stringify({ score: sb + '→' + qa.score, clip: clips.slice(-3), nose: [q.nose.sx, q.nose.sy, q.nose.r] }));
+      await T.close();
+    }
+    {
+      const T = await open(P + 'seed=53&pat=kung'); await T.start(); await T.toCell('B0');
+      await T.waitFor('q.atk && q.atk.step === "lunge" && q.atk.cell === "B0" && q.atk.t > q.atk.dur * 0.3', 10000); await T.go(0, 1); await T.lift();
+      const q = await T.waitFor('q.atk && q.atk.step === "lunge" && q.atk.t > q.atk.dur * 0.62', 3000);
+      if (q) await T.tap(q.nose.sx, q.nose.sy);
+      const qa = await T.waitFor('q.boops === 1', 800);
+      ok(`${tag} 뒷줄 B0 앙: 쿠키를 B1로 비킨 뒤 코 가운데 톡 → +45 (쿠키 근처만 끌기 우선)`, !!qa && qa.score >= 45, q && JSON.stringify({ nose: [q.nose.sx, q.nose.sy, q.nose.r], cookie: [q.cookie.sx, q.cookie.sy], score: qa && qa.score }));
       await T.close();
     }
     /* ---------- 11. 가림: 앞줄 앙이 뒷줄 쿠키 앞을 지나면 쿠키를 흰 외곽선 + 55% ---------- */

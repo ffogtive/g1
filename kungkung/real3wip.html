@@ -372,7 +372,7 @@
   var PAT = {
     kung:    { boop: 1, steps: [{ k: 'tell', d: 0.6 }, { k: 'lunge' }, { k: 'stamp' }, { k: 'back' }] },
     big:     { label: '크게 킁!', boop: 1, big: 1, steps: [{ k: 'tell', d: 1.1, grow: 1 }, { k: 'lunge', d: 0.48 }, { k: 'stamp' }, { k: 'back' }] },
-    hold:    { label: '멈칫…', boop: 1, steps: [{ k: 'tell', d: 0.6 }, { k: 'hold' }, { k: 'lunge', d: 0.16 }, { k: 'stamp' }, { k: 'back' }] },
+    hold:    { label: '멈칫…', boop: 0, steps: [{ k: 'tell', d: 0.6 }, { k: 'hold' }, { k: 'lunge', d: 0.16 }, { k: 'stamp' }, { k: 'back' }] },
     feint:   { label: '가짜?', boop: 1, steps: [{ k: 'tell', d: 0.6 }, { k: 'lunge', d: 0.6, fake: 1 }, { k: 'tilt', d: 1.4 }, { k: 'tell', d: 0.45 }, { k: 'lunge' }, { k: 'stamp' }, { k: 'back' }] },
     double:  { label: '두 번!', boop: 1, reps: 2, steps: [{ k: 'tell', d: 0.6 }, { k: 'lunge' }, { k: 'stamp', d: 0.22 }, { k: 'back' }] },
     triple:  { label: '세 번!', boop: 1, reps: 3, steps: [{ k: 'tell', d: 0.6 }, { k: 'lunge' }, { k: 'stamp', d: 0.22 }, { k: 'back' }] },
@@ -393,6 +393,7 @@
       atk: null, nextAtk: 2.0, pops: [], fx: [], shake: 0, shot: null, endT: null,
       shift: 0, shiftT: 0, shiftY: 0, shiftYT: 0, zoom: 1, ox: Wl / 2, oy: Hl * 0.8, jit: 0, huh: 0, freeze: 0, hsTotal: 0, hsN: 0, punchT: 9, punchAmp: 0, camX: 0, camY: 0 };
     G.cookie.x = cookieSX();
+    for (var pid in drags) delete drags[pid];   // 결과 카드 동안 대고 있던 손가락의 변위가 새 판에 들어가지 않게
     hideOver(); idle();
     document.getElementById('pick').hidden = started;
   }
@@ -466,8 +467,10 @@
 
   /* ---------------- 입력: 상대 끌기 + 폴짝 ----------------
      가로: 손가락이 닿은 곳에서부터 끈다(105px = 1칸, 쿠키 순간이동 없음).
-     폴짝: ① 느린 끌기 — 세로 누적 − 0.25 × 가로 누적 ≥ 44px  ② 빠른 쓸기 — 세로 속도 ≥ 500px/s, 각도 ≥ 35°, (세로 − 0.25 × 가로) ≥ 16px.
-           가로 누적은 0.25초로 잦아들어, 가로로 쓰는 중 생기는 세로 흔들림(120px당 30px)은 무시된다. 폴짝 직후 0.1초는 반대 방향 무시. */
+     폴짝: ① 느린 끌기 — 방향별 누적 s = max(0, s + 그 방향 세로 − 0.25 × |가로|) ≥ 44px
+             (움직일 때마다 더하므로 기울기 14° 아래의 비스듬한 긴 끌기는 쌓이지 않고, 가로 120px 쓸기의 세로 흔들림 30px도 안 넘는다)
+           ② 빠른 쓸기 — 최근 60ms 창에서 세로 속도 ≥ 500px/s, 각도 ≥ 35°, (세로 − 0.25 × 가로) ≥ 16px (옆으로 피한 직후의 짧은 튕김도 바로 먹힘)
+           폴짝 직후 0.1초는 반대 방향 무시. 끌기는 첫 손가락 하나만 (다른 손가락은 코 톡만). */
   function toL(e) { var r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s }; }
   var drags = {};
   function hop(dir) {
@@ -478,30 +481,31 @@
   function startDrag(e, p) {
     try { cv.setPointerCapture(e.pointerId); } catch (er) { /* 무시 */ }
     var t = performance.now() / 1000;
-    drags[e.pointerId] = { x: p.x, y: p.y, t: t, v: 0, h: 0, hist: [{ t: t, x: p.x, y: p.y }], block: 0 };
+    drags[e.pointerId] = { x: p.x, y: p.y, t: t, up: 0, dn: 0, hist: [{ t: t, x: p.x, y: p.y }], block: 0 };
   }
   cv.addEventListener('pointerdown', function (e) {
     audio(); warmAll(); var p = toL(e);
-    if (G.state === 'title') { if (ready < FIRST_FILES.length) return; newGame(true); startDrag(e, p); return; }
+    var zone = p.y >= Math.min(Hl * 0.6, rowY[ROWS - 1] - 90);   // 화면 아래 40% 아무 데서나
+    if (G.state === 'title') { if (ready < FIRST_FILES.length || !zone) return; newGame(true); startDrag(e, p); return; }   // 시작 탭은 아래 구역만 (종 버튼 근처 오탭 방지)
     if (G.state !== 'play') return;
     if (tryBoop(p)) return;
-    if (p.y >= Math.min(Hl * 0.6, rowY[ROWS - 1] - 90)) startDrag(e, p);   // 화면 아래 40% 아무 데서나
+    if (zone && !Object.keys(drags).length) startDrag(e, p);   // 끌기는 첫 손가락 하나만
   });
   cv.addEventListener('pointermove', function (e) {
     var d = drags[e.pointerId]; if (!d || !G || G.state !== 'play') return;
-    var p = toL(e), now = performance.now() / 1000, dx = p.x - d.x, dy = p.y - d.y, dt = Math.max(1e-3, now - d.t), C = G.cookie;
+    var p = toL(e), now = performance.now() / 1000, dx = p.x - d.x, dy = p.y - d.y, C = G.cookie;
     d.x = p.x; d.y = p.y; d.t = now;
     C.tX = Math.max(-XMAX, Math.min(XMAX, C.tX + dx / FW));
     if (ROWS < 2) return;
-    d.h = d.h * Math.exp(-dt / 0.25) + Math.abs(dx); d.v += dy;
+    d.up = Math.max(0, d.up - dy - 0.25 * Math.abs(dx)); d.dn = Math.max(0, d.dn + dy - 0.25 * Math.abs(dx));   // 위로 = 뒷줄
     d.hist.push({ t: now, x: p.x, y: p.y }); while (d.hist.length > 2 && now - d.hist[0].t > 0.06) d.hist.shift();
-    var dir = d.v < 0 ? 1 : -1, to = C.row + dir;   // 위로 = 뒷줄
-    if (to < 0 || to >= ROWS) { d.v = 0; return; }   // 끝 줄에서 더 밀어도 아무 일 없음 (쌓이지도 않음)
-    if (now < d.block) { d.v = 0; return; }           // 폴짝 직후 0.1초는 반대 방향 무시
-    var h0 = d.hist[0], ht = Math.max(1e-3, now - h0.t), vx = (p.x - h0.x) / ht, vy = (p.y - h0.y) / ht;
-    var slow = Math.abs(d.v) - 0.25 * d.h >= RULE.HOP_SLOW;
-    var fast = Math.abs(vy) >= RULE.HOP_FAST && Math.abs(d.v) - 0.25 * d.h >= 16 && (vy < 0) === (dir > 0) && Math.atan2(Math.abs(vy), Math.abs(vx)) >= 35 * Math.PI / 180;
-    if (slow || fast) { hop(dir); d.v = 0; d.h = 0; d.block = now + 0.1; }
+    if (C.row >= ROWS - 1) d.up = 0; if (C.row <= 0) d.dn = 0;   // 끝 줄에서 더 밀어도 아무 일 없음 (쌓이지도 않음)
+    if (now < d.block) { d.up = d.dn = 0; return; }              // 폴짝 직후 0.1초는 반대 방향 무시
+    var h0 = d.hist[0], ht = Math.max(1e-3, now - h0.t), wx = p.x - h0.x, wy = p.y - h0.y, steep = Math.atan2(Math.abs(wy), Math.abs(wx)) >= 35 * Math.PI / 180;
+    var fastUp = C.row < ROWS - 1 && -wy / ht >= RULE.HOP_FAST && -wy - 0.25 * Math.abs(wx) >= 16 && steep;
+    var fastDn = C.row > 0 && wy / ht >= RULE.HOP_FAST && wy - 0.25 * Math.abs(wx) >= 16 && steep;
+    var dir = d.up >= RULE.HOP_SLOW || fastUp ? 1 : d.dn >= RULE.HOP_SLOW || fastDn ? -1 : 0;
+    if (dir) { hop(dir); d.up = d.dn = 0; d.block = now + 0.1; d.hist = [{ t: now, x: p.x, y: p.y }]; }
   });
   function endP(e) { delete drags[e.pointerId]; }
   cv.addEventListener('pointerup', endP); cv.addEventListener('pointercancel', endP);
@@ -573,7 +577,7 @@
   function endAttack() {
     var a = G.atk, C = G.cookie; G.atk = null; G.nextAtk = a ? a.nextIv : 1.5; G.shiftT = 0; G.shiftYT = 0;
     if (G.endT != null && G.hearts <= 0 && !G.ate && ok(SP.eat.file)) {   // 마지막 쿠키: 냠냠(꿀꺽) 하고 결과 카드
-      G.ate = true; var ed = SP.eat.to / 2;
+      G.ate = true; var ed = SP.eat.to / 2; C.hidden = 1;   // 특기로 납작해진 쿠키도 냠냠
       playSeg(SP.eat.file, 0, SP.eat.to, ed, false, idle); pop(SP.eat.word, Wl * 0.72, Hl * 0.24, 36, '#ffffff'); SND.chew();
       G.endT = ed + 0.4;
     } else { idle(); if (G.endT != null && G.hearts <= 0) G.endT = Math.min(G.endT, 0.6); }
@@ -633,9 +637,11 @@
       }
     } else if (st.k === 'hold') {
       // 멈칫: 입을 벌린 채 쿠키 바로 위에서 망설이며 킁킁 (영상을 멈추지 않고 그대로 재생). 앞줄 전용, 잠금 자리는 영상을 밀 수 있는 범위 안
-      a.set = SP.snap.h; a.key = 'h'; a.mir = a.laneRoll < 0.5; a.held = true; a.locked = true; a.lockRow = 0; a.r = RULE.HIT; a.rOther = 0;
-      var hc = biteX(a.set, a.mir), lx = Math.max(hc - BUDGET, Math.min(hc + BUDGET, sxRow(0, a.tX)));
-      a.lockX = gxRow(0, lx); a.cell = nearestCol(a.lockX);
+      a.set = SP.snap.h; a.key = 'h'; a.held = true; a.locked = true; a.lockRow = 0; a.r = RULE.HIT; a.rOther = 0;
+      var cx0 = sxRow(0, a.tX), far = function (m) { return Math.max(0, Math.abs(cx0 - biteX(a.set, m)) - BUDGET); }, fA = far(false), fB = far(true);
+      a.mir = Math.abs(fA - fB) < 1 ? a.laneRoll < 0.5 : fB < fA;   // 쿠키에 닿는 쪽(같으면 시드 굴림)
+      var hc = biteX(a.set, a.mir), lx = Math.max(hc - BUDGET, Math.min(hc + BUDGET, cx0));
+      a.lockX = gxRow(0, lx); a.hold0 = a.lockX; a.cell = nearestCol(a.lockX);
       ensureSafe(a); G.lanes.push('h:' + Math.round(lx));
       a.shift0 = G.shift; a.shiftT = clampB(lx - hc); a.shiftYT = shiftYFor(0, a.set.bite.y);
       playSeg(SP.hover.file, SP.hover.down[0], SP.hover.down[1] + a.holdD, a.dur, a.mir, null);
@@ -680,7 +686,10 @@
       if (q >= 1) { if (a.fake) { nextStep(a); return; } impactNose(a); return; }
     } else if (k === 'hold') {
       var hc = biteX(a.set, a.mir), lx = sxRow(0, a.lockX);   // 빨간 원이 쿠키 쪽으로 슬금슬금 (영상도 같이, 밀 수 있는 만큼). 쿠키가 뒷줄로 가면 따라가지 않음
-      if (judgeRow() === 0) { lx += Math.max(-50 * dt, Math.min(50 * dt, C.x - lx)); lx = Math.max(hc - BUDGET, Math.min(hc + BUDGET, lx)); a.lockX = gxRow(0, lx); }
+      if (judgeRow() === 0) {
+        lx += Math.max(-50 * dt, Math.min(50 * dt, C.x - lx));
+        lx = Math.max(hc - BUDGET, sxRow(0, a.hold0 - 0.34), Math.min(hc + BUDGET, sxRow(0, a.hold0 + 0.34), lx)); a.lockX = gxRow(0, lx);   // 밀기 한계 ∩ 처음 자리 ±0.34칸
+      }
       a.shiftT = clampB(lx - hc);
       G.shift += (a.shiftT - G.shift) * Math.min(1, dt * 10); G.shiftT = G.shift;
       G.shiftY += (a.shiftYT - G.shiftY) * Math.min(1, dt * 6); G.shiftYT = G.shiftY;
@@ -700,9 +709,10 @@
   }
   /** 판정 구간 [{row, a, b}] (땅 X, 칸 단위): 그리기와 판정이 같은 값 (보이는 것 = 판정) */
   function hitsOf(a) {
-    if (!a || !a.st) return [];
-    var k = a.st.k, out = [];
-    if (a.taps) { if (k === 'tell' || k === 'spec') a.taps.forEach(function (tp) { if (!tp.done) out.push({ row: tp.row, a: tp.X - a.r, b: tp.X + a.r }); }); return out; }
+    if (!a) return [];
+    var k = a.st ? a.st.k : null, out = [];
+    if (a.taps) { if (!k || k === 'tell' || k === 'spec') a.taps.forEach(function (tp) { if (!tp.done) out.push({ row: tp.row, a: tp.X - a.r, b: tp.X + a.r }); }); return out; }
+    if (!k) return out;
     if ((k === 'lunge' || k === 'hold' || k === 'tell') && a.locked && a.lockX != null) {
       var lo = a.lockX - a.r, hi = a.lockX + a.r;
       if (a.sweepFrom != null) { lo = Math.min(lo, a.sweepFrom - a.r); hi = Math.max(hi, a.sweepFrom + a.r); }
@@ -747,7 +757,8 @@
   function tryBoop(p) {
     var a = G.atk; if (!a || !a.st || a.st.k !== 'lunge' || a.fake || !a.P.boop || G.endT != null) return false;
     var n = nosePose(), q0 = a.P.big ? RULE.BOOP_Q0_BIG : RULE.BOOP_Q0;
-    if (n.q < q0 || n.q > 0.92 || p.y > cookieSY() - 36 || Math.hypot(p.x - n.x, p.y - n.y) > Math.max(44, n.r * 1.3)) return false;   // 닿기 직전·쿠키 근처는 끌기 우선
+    var nearCookie = Math.hypot(p.x - G.cookie.x, p.y - cookieSY()) < 52 * (1 - 0.3 * G.cookie.rowT);
+    if (n.q < q0 || n.q > 0.92 || nearCookie || Math.hypot(p.x - n.x, p.y - n.y) > Math.max(44, n.r * 1.3)) return false;   // 닿기 직전·쿠키 근처는 끌기 우선
     var pts = a.lockRow === 1 ? 45 : a.P.big ? 50 : 30;
     a.st = { k: 'boop' }; a.t = 0; a.locked = false; a.rep = 99; G.shiftT = 0; G.shiftYT = 0;
     G.boops++; G.combo++; G.score += pts; G.freeze = HS.boop; G.hsN++; G.hsTotal += HS.boop;
@@ -794,7 +805,7 @@
     SND[SP.special.snd](); buzz(hit ? [40, 30, 60] : 30);
     for (var i = 0; i < 14; i++) G.fx.push({ x: x + (FX() - 0.5) * 80 * k, y: gy + 6, vx: (FX() - 0.5) * 220 * k, vy: (-40 - FX() * 120) * k, t: 0, life: 0.8, r: (5 + FX() * 8) * k, c: 'dust' });
     if (hit) { a.caught = true; caught(C, SP.special.hit, x < Wl / 2 ? 1 : -1); C.squash = 1; }
-    else if (!inside) { dodged(C, m < RULE.CLOSE || (C.rowAt > G.t - 0.1 && C.rowFrom === tp.row && jr !== tp.row), tp.row === 0); }   // 깜빡임 중 안에 있으면 피함도 아님
+    else if (!inside && !a.caught && G.endT == null) { dodged(C, m < RULE.CLOSE || (C.rowAt > G.t - 0.1 && C.rowFrom === tp.row && jr !== tp.row), tp.row === 0); }   // 깜빡임 중 안에 있거나, 이 특기에 이미 물렸거나, 판이 끝났으면 피함도 아님
   }
   function caught(C, word, side) {
     G.hearts--; G.combo = 0; C.inv = 0.9; if (G.atk) G.hitKinds.push(G.atk.kind + '@' + G.play.toFixed(1));
@@ -849,7 +860,7 @@
     if (G.state === 'play') {
       G.play += gdt; updateAttack(gdt);
       if (G.endT != null) { G.endT -= dt; if (G.endT <= 0) gameOver(); }
-    } else if (G.state === 'title') { C.tX = Math.sin(G.t * 1.3) * 1.0; G.shiftT = (C.x - Wl / 2) * 0.06; }
+    } else if (G.state === 'title') { G.shiftT = Math.sin(G.t * 1.3) * 6; }   // 시작 화면: 쿠키는 가운데 그대로(시작할 때 순간이동 없음), 동물만 살짝 기웃
     a = G.atk;
     var driven = a && a.st && (a.st.k === 'lunge' || a.st.k === 'hold' || a.st.k === 'spec');
     if (!driven) { G.shift += (G.shiftT - G.shift) * Math.min(1, dt * 4); G.shiftY += (G.shiftYT - G.shiftY) * Math.min(1, dt * 4); }
@@ -865,7 +876,7 @@
     document.getElementById('card').innerHTML = '<h2>다 먹혔어요!</h2>' + (G.shot ? '<img class="shot" alt="물린 순간" src="' + G.shot + '">' : '') +
       '<div class="big">' + G.score + '</div><div class="sub">' + SP.name + ' · ' + (isBest ? '최고 기록!' : '최고 ' + G.best) + '<br>피함 ' + G.dodges + ' · 코 톡 ' + G.boops + ' · 폴짝 ' + G.hops + '</div>' +
       '<div class="row"><button class="pill" data-act="title" aria-label="처음으로">처음</button><button class="pill main" data-act="again" aria-label="다시">↻ 다시</button></div>';
-    document.getElementById('over').classList.add('show');
+    var ov = document.getElementById('over'); ov.classList.add('show'); ov.style.pointerEvents = 'none'; setTimeout(function () { ov.style.pointerEvents = ''; }, 500);   // 피하려던 손가락에 바로 눌리지 않게
   }
   function hideOver() { document.getElementById('over').classList.remove('show'); document.getElementById('card').innerHTML = ''; }
   document.getElementById('over').addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; audio(); newGame(b.getAttribute('data-act') !== 'title'); });
@@ -944,7 +955,8 @@
   }
   /** 판정 타원: 잔디 위에 납작한 타원 (줄마다 크기 다름). 빨강 = 잠긴 판정, 흰색 = 아직 노리는 중 */
   function ringAt(rt, X0, X1, rcell, red, al) {
-    var A = at(rt, X0), B = at(rt, X1), cx = (A.x + B.x) / 2, rx = Math.max(4, (B.x - A.x) / 2), ry = Math.max(4, rcell * (A.sl + B.sl) / 2 * FL), y = (A.y + B.y) / 2 + 12 * A.k, pulse = 1 + Math.sin(G.t * 20) * 0.04;
+    var A = at(rt, X0), B = at(rt, X1), cx = (A.x + B.x) / 2, rx = Math.max(4, (B.x - A.x) / 2), gap = ROWS > 1 ? Math.abs(rowY[0] - rowY[1]) : 1e9;
+    var ry = Math.max(4, Math.min(rcell * (A.sl + B.sl) / 2 * FL, gap * 0.4)), y = (A.y + B.y) / 2 + (12 - 9 * Math.min(1, rt)), pulse = 1 + Math.sin(G.t * 20) * 0.04;   // 두 줄 타원이 서로의 쿠키를 덮지 않게
     ctx.fillStyle = red ? 'rgba(255,80,80,' + 0.34 * al + ')' : 'rgba(255,255,255,' + 0.22 * al + ')'; ctx.beginPath(); ctx.ellipse(cx, y, rx * pulse, ry * pulse, 0, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = red ? 'rgba(255,70,70,' + 0.95 * al + ')' : 'rgba(255,255,255,' + 0.95 * al + ')'; ctx.lineWidth = 3 * A.k; ctx.setLineDash([8 * A.k, 6 * A.k]); ctx.beginPath(); ctx.ellipse(cx, y, rx, ry, 0, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
   }
@@ -979,7 +991,7 @@
       for (var i = 0; i < 3; i++) { ctx.save(); ctx.translate(26 + i * 34, 34); ctx.fillStyle = i < G.hearts ? '#ff6b8b' : 'rgba(255,255,255,0.4)'; ctx.strokeStyle = OL; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(0, 9); ctx.bezierCurveTo(-16, -2, -9, -15, 0, -6); ctx.bezierCurveTo(9, -15, 16, -2, 0, 9); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore(); }
       drawText(String(G.score), Wl - 18, 36, 34, '#ffffff', 'right');
       if (G.combo >= 2) drawText(G.combo + '연속', Wl - 18, 66, 18, '#ffd23f', 'right');
-      if (ROWS > 1 && G.state === 'play' && G.play < 5 && !G.hops) { ctx.save(); ctx.globalAlpha = Math.min(1, (5 - G.play) / 1.5); drawText('위·아래로 쓸면 폴짝!', Wl / 2, Hl * 0.46, 24, '#ffffff'); ctx.restore(); }
+      if (ROWS > 1 && G.state === 'play' && G.play < 5 && !G.hops && !G.atk) { ctx.save(); ctx.globalAlpha = Math.min(1, (5 - G.play) / 1.5); drawText('위·아래로 쓸면 폴짝!', Wl / 2, Hl * 0.2, 24, '#ffffff'); ctx.restore(); }   // 코가 지나가는 길을 가리지 않게
     } else {
       drawText('킁킁!', Wl / 2, Hl * 0.08, 60, '#ffffff');
       if (G.best) drawText('최고 ' + G.best, Wl / 2, Hl * 0.08 + 44, 18, '#ffd23f');

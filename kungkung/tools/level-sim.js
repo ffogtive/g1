@@ -194,7 +194,7 @@ function simulate(L, B, seed) {
       a.fake = !!st.fake;
       if (!a.fake) { lock(a); if (!a.held && a.lockRow === 1) a.dur *= RULE.BACK_LUNGE; }   // 뒷줄 앙 ×1.25
     } else if (st.k === 'hold') {   // 멈칫: 앞줄 가운데 클립을 밀기 범위 안에서 쿠키 쪽으로
-      a.held = true; a.locked = true; a.lockRow = 0; a.r = RULE.HIT; a.lockX = clamp(a.tX, -LY.holdSpan, LY.holdSpan); ensureSafe(a);
+      a.held = true; a.locked = true; a.lockRow = 0; a.r = RULE.HIT; a.lockX = clamp(a.tX, -LY.holdSpan, LY.holdSpan); a.hold0 = a.lockX; ensureSafe(a);
     } else if (st.k === 'back') {
       if (a.P.special) { a.dur = 0.02; return; }
       a.prev = { row: a.lockRow, X: a.lockX };
@@ -224,7 +224,7 @@ function simulate(L, B, seed) {
       if (a.fake) follow(3);
       if (q >= 1) { if (a.fake) nextStep(a); else impact(a); return; }
     } else if (k === 'hold') {   // 빨간 원이 쿠키 쪽으로 50px/s 슬금슬금 (밀 수 있는 만큼). 뒷줄로 가면 따라가지 않음
-      if (jr() === 0) a.lockX = clamp(a.lockX + clamp(C.X - a.lockX, -50 / FW * dt, 50 / FW * dt), -LY.holdSpan, LY.holdSpan);
+      if (jr() === 0) a.lockX = clamp(a.lockX + clamp(C.X - a.lockX, -50 / FW * dt, 50 / FW * dt), Math.max(-LY.holdSpan, a.hold0 - 0.34), Math.min(LY.holdSpan, a.hold0 + 0.34));   // 처음 자리 ±0.34칸
     } else if (k === 'tilt') follow(7);
     else if (k === 'spec') a.taps.forEach(tp => { if (!tp.done && a.t >= tp.t) { tp.done = true; stomp(a, tp); } });
     if (atk === a && a.t >= a.dur) nextStep(a);
