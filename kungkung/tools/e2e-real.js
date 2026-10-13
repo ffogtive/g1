@@ -94,7 +94,7 @@ const isGrass = c => c[1] > c[0] * 1.15 && c[1] > c[2] * 1.15;
   const WANT = [{ key: 'r2', mir: 1 }, { key: 'c', mir: 0 }, { key: 'r2', mir: 0 }];
   for (let li = 0; li < 3; li++) {
     const T = await open('?seed=' + (li + 3) + '&pat=kung');
-    if (li === 0) { const q0 = await T.waitFor('q.readyAll === q.files', 40000); ok('소재 로드: 앙 클립·거꾸로·대기 고리 5개(WebM)', !!q0 && q0.files === 5, q0 && q0.readyAll + '/' + q0.files + ' ' + q0.src + ' lanes ' + q0.slanesX); }
+    if (li === 0) { const q0 = await T.waitFor('q.readyAll === q.files', 40000); ok('소재 로드: 앙·거꾸로·대기·가짜·멈칫 클립 8개(WebM)', !!q0 && q0.files === 8 && q0.readyAll === 8, q0 && q0.readyAll + '/' + q0.files + ' ' + q0.src + ' lanes ' + q0.slanesX); }
     await T.start(); await T.moveTo(T.lanes[li]);
     const q = await T.waitFor('q.atk && q.atk.step === "stamp"', 12000), a = q && q.atk;
     await T.page.screenshot({ path: `${OUT}/bite-${li}.png` });
@@ -148,10 +148,11 @@ const isGrass = c => c[1] > c[0] * 1.15 && c[1] > c[2] * 1.15;
     ok('가짜 돌진: 흰 원, 판정 구간 없음', q && q.atk.color === 'white' && q.atk.hits.length === 0, q && JSON.stringify({ c: q.atk.color, hits: q.atk.hits, clip: q.clip }));
     if (q) { await T.touch('touchEnd'); await T.tap(q.nose.sx, q.nose.sy); await T.touch('touchStart', T.fx, T.fy); }
     ok('가짜 돌진 중 톡은 무시', (await T.snap()).boops === 0);
-    q = await T.waitFor('q.atk && q.atk.step === "tilt"', 4000);
-    await T.page.waitForTimeout(400);
+    q = await T.waitFor('q.atk && q.atk.step === "tilt" && q.atk.t > q.atk.dur * 0.6', 4000);
+    await T.page.screenshot({ path: OUT + '/feint-tilt.png' });
+    q = await T.waitFor('q.atk && q.atk.step === "tell" && q.atk.i === 3', 4000);
     const clips = await T.page.evaluate(() => window.__clips);
-    ok('가짜 뒤: 반쯤에서 거꾸로(_rev) 고개 듦 → 대기 고리(메롱)', !!q && clips.some(c => /_rev/.test(c)) && /idle/.test(clips[clips.length - 1]), clips.join('>'));
+    ok('가짜: 전용 클립으로 숙였다가 같은 클립을 이어서 킁킁·갸웃·듦 → 대기 (거꾸로 재생 없음)', !!q && clips.join('>') === 'v3/idle>v3/feint>v3/idle', clips.join('>'));
     q = await T.waitFor('q.atk && q.atk.step === "lunge" && q.atk.phase === "lunge"', 4000);
     ok('그다음 진짜 앙은 빨강', q && q.atk.color === 'red' && q.atk.hits.length === 1);
     await T.close();
@@ -159,14 +160,15 @@ const isGrass = c => c[1] > c[0] * 1.15 && c[1] > c[2] * 1.15;
   /* ---------- 6. 멈칫: 입 벌린 채 쿠키 바로 위에서 영상 정지, 빨간 원이 슬금 ---------- */
   {
     const T = await open('?seed=41&pat=hold'); await T.start();
-    let q = await T.waitFor('q.atk && q.atk.step === "hold" && q.atk.t > 0.25', 10000);
-    const x0 = q.atk.tx, c0 = q.clipT, t0 = q.t;
+    let q = await T.waitFor('q.atk && q.atk.step === "hold" && q.atk.t > 0.3', 10000);
+    const x0 = q.atk.tx, c0 = q.clipT, t0 = q.t, clip0 = q.clip;
     await T.moveTo(q.cookie.x > 195 ? q.cookie.x - 120 : q.cookie.x + 120);
     await T.page.screenshot({ path: OUT + '/hold.png' });
     const qm = await T.snap();
     q = await T.waitFor('q.atk && q.atk.step !== "hold"', 3000);
-    ok('멈칫: 0.5~0.9초 영상 정지, 빨간 원이 쿠키 쪽으로 슬금(칸 ±36px 안)', q && Math.abs(q.atk.tx - x0) > 3 && Math.abs(q.atk.tx - x0) <= 37 && q.t - t0 < 1.0 && Math.abs(qm.clipT - c0) < 0.03,
-      JSON.stringify({ moved: q && Math.abs(q.atk.tx - x0), clipT: [c0, qm.clipT], held: q && +(q.t - t0).toFixed(2) }));
+    const q2 = await T.waitFor('q.atk && q.atk.step === "stamp"', 2000);
+    ok('멈칫: 망설이는 클립이 멈추지 않고 재생되는 동안 빨간 원이 쿠키 쪽으로 슬금, 이어서 진짜 앙 클립', q && clip0 === 'v3/hover' && qm.clipT > c0 + 0.05 && Math.abs(q.atk.tx - x0) > 3 && Math.abs(q.atk.tx - x0) <= q.budget + 1 && q.t - t0 < 1.0 && q2 && q2.clip === 'v3/hsnap',
+      JSON.stringify({ clip: [clip0, q2 && q2.clip], moved: q && Math.abs(q.atk.tx - x0), clipT: [c0, qm.clipT], held: q && +(q.t - t0).toFixed(2) }));
     await T.close();
   }
   /* ---------- 7. 코 톡 vs 쿠키 끌기 ---------- */
@@ -211,8 +213,10 @@ const isGrass = c => c[1] > c[0] * 1.15 && c[1] > c[2] * 1.15;
   /* ---------- 10. 소리: manifest가 비면 합성음, 있으면 샘플을 받고, 깨진 파일은 그 소리만 합성음 (오류 없이) ---------- */
   {
     let T = await open('?seed=81'); await T.start();
+    await T.page.waitForFunction(() => { const q = window.kung.snapshot(); return q.sfx.loaded + q.sfx.failed >= q.sfx.want; }, null, { timeout: 15000 }).catch(() => {});
     let q = await T.snap();
-    ok('소리: manifest가 비어 있으면 샘플 0개(전부 합성음), 오류 없음', q.sfx.want === 0 && q.sfx.failed === 0, JSON.stringify(q.sfx));
+    const man = JSON.parse(fs.readFileSync(path.join(ROOT, 'real/sfx/manifest.json'), 'utf8')), n = Object.keys(man.files || {}).length;
+    ok(`소리: manifest의 ElevenLabs 샘플 ${n}개를 모두 받음 (없는 소리만 합성음), 오류 없음`, q.sfx.want === n && q.sfx.loaded === n && q.sfx.failed === 0, JSON.stringify(q.sfx));
     await T.close();
     const bp = process.env.BEEP || path.join(OUT, 'beep.mp3');
     if (!fs.existsSync(bp)) require('child_process').execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=600:duration=0.3', '-ac', '1', '-b:a', '64k', bp]);

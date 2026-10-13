@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>시바 비교</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&display=swap">
+<!--
+  시바 비교: 실사 AI 영상 vs Meshy 3D
+  가설: 적(강아지·고양이)을 실사 영상으로 만들지 3D로 만들지는 "같은 시바"를 두 방식으로 나란히 놓고
+        ① 귀여움·실사감 ② 앞뒤·대각선(3열×2줄) 6칸을 무는 자연스러움 ③ 종당 비용을 보면 정할 수 있다.
+  - 왼쪽: Seedance 영상 클립 5개 (대기·앞줄 앙·뒷줄 앙·가짜·냠냠), 시작·끝 = 같은 기준 사진
+  - 오른쪽: Meshy 7 이미지→3D 모델을 three.js로 렌더. Meshy 동작 목록에 네발 동작이 없어,
+            목·머리 쪽 정점을 셰이더에서 굽혀(코드 애니메이션) 6칸 어디든 고개를 숙여 앙 한다.
+-->
+<style>
+  :root { --bg:#f7f1e8; --card:#fffdf8; --fg:#3b2a22; --muted:#8a6a5a; --line:#e7d6c8; --accent:#e8643f; --chip:#fff0e6; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#1d1612; --card:#28201b; --fg:#f4e8dc; --muted:#c3a796; --line:#3f322a; --accent:#ff8a63; --chip:#3e2a20; color-scheme: dark; } }
+  :root[data-theme="dark"] { --bg:#1d1612; --card:#28201b; --fg:#f4e8dc; --muted:#c3a796; --line:#3f322a; --accent:#ff8a63; --chip:#3e2a20; color-scheme: dark; }
+  html, body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif; }
+  main { max-width:880px; margin:0 auto; padding:16px 16px 40px; display:grid; gap:14px; }
+  h1 { font-family:"Jua",system-ui,sans-serif; font-weight:normal; font-size:30px; margin:0; text-wrap:balance; }
+  .lead { margin:0; color:var(--muted); }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:640px) { .grid { grid-template-columns:1fr; } }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:12px; display:grid; gap:10px; min-width:0; }
+  .panel h2 { font-family:"Jua",system-ui,sans-serif; font-weight:normal; font-size:22px; margin:0; display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  .cost { font:13px system-ui,sans-serif; color:var(--muted); }
+  .stage { position:relative; width:100%; max-width:360px; margin:0 auto; aspect-ratio:9/16; border-radius:12px; overflow:hidden; background:#7fb2e6; }
+  .stage video, .stage canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+  .stage video { opacity:0; transition:opacity .12s linear; }
+  .stage video.on { opacity:1; }
+  .btns { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; }
+  button { font:inherit; font-size:14px; border:1px solid var(--line); background:var(--chip); color:var(--fg); border-radius:999px; padding:6px 12px; cursor:pointer; }
+  button.on { border-color:var(--accent); color:var(--accent); }
+  .grid6 { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; max-width:300px; margin:0 auto; }
+  .grid6 button { border-radius:10px; padding:8px 4px; }
+  .note { font-size:13px; color:var(--muted); margin:0; }
+  .verdict { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:12px 14px; }
+  .verdict h2 { font-family:"Jua",system-ui,sans-serif; font-weight:normal; font-size:20px; margin:0 0 6px; }
+  .verdict table { width:100%; border-collapse:collapse; font-size:14px; }
+  .verdict th, .verdict td { text-align:left; padding:6px 4px; border-top:1px solid var(--line); vertical-align:top; }
+  .verdict th { font-weight:600; width:26%; }
+  #status { font-size:13px; color:var(--muted); text-align:center; margin:0; min-height:1.5em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>시바 비교: 실사 영상 vs 3D</h1>
+  <p class="lead">같은 시바를 두 방식으로 만들었어요. 귀여움·실사감, 앞뒤 칸을 무는 자연스러움, 비용을 보고 20종을 어느 쪽으로 만들지 골라 주세요.</p>
+  <div class="grid">
+    <section class="panel">
+      <h2>실사 영상 <span class="cost">종당 약 425크레딧</span></h2>
+      <div class="stage" id="vstage"></div>
+      <div class="btns" id="vbtns"></div>
+      <p class="note">AI 영상 클립 5개(각 35크레딧). 칸마다 클립이 필요해요(3열×2줄이면 앙 4개 + 반전).</p>
+    </section>
+    <section class="panel">
+      <h2>3D 모델 <span class="cost">종당 약 80크레딧</span></h2>
+      <div class="stage" id="tstage"><canvas id="cv3"></canvas></div>
+      <div class="grid6" id="tgrid"></div>
+      <div class="btns" id="tbtns"></div>
+      <p id="status">3D 모델 불러오는 중…</p>
+      <p class="note">Meshy 7 이미지→3D 모델(38크레딧, 정점 7.7만, 텍스처 1024). <b>리깅이 없어</b> 고개 숙이기를 코드로 목 정점을 굽혀 만들었더니 앙 할 때 머리 뒤가 고무처럼 늘어나요. 제대로 하려면 네발 리깅 + 물기 동작을 따로 만들어야 해요.</p>
+    </section>
+  </div>
+  <section class="verdict">
+    <h2>한눈에 비교</h2>
+    <table>
+      <tr><th>실사감·귀여움</th><td>영상: 진짜 강아지 그대로 (털·눈빛·혀)<br>3D: 모양은 시바지만 털 질감·표정은 덜 살아 있음</td></tr>
+      <tr><th>앞뒤·대각선</th><td>영상: 칸마다 클립 필요, 뒷줄 앙도 영상으로 됨<br>3D: 각도·칸이 자유, 연출을 코드로 바로 바꿈</td></tr>
+      <tr><th>20종 비용</th><td>영상 약 8,500 · 3D 약 1,600 (먹이 캐릭터 3D 약 470은 공통)</td></tr>
+      <tr><th>이번 시험 결과</th><td>영상: 5개 모두 한 번에 성공, <b>뒷줄 앙도 됨</b>(자기 발 옆 잔디를 물고, 멀어서 머리가 작게 보임)<br>3D: 서 있는 모습은 그럴듯하지만, 리깅 없이 굽힌 앙은 머리가 늘어나 어색함</td></tr>
+      <tr><th>위험</th><td>영상: 클립마다 결과가 들쭉날쭉해 재시도가 필요<br>3D: 네발 리깅·물기 동작 제작이 따로 필요하고, 털 질감이 약해 "AB2급 귀여움"에 못 미칠 수 있음</td></tr>
+    </table>
+  </section>
+</main>
+<script src="vendor/three.min.js"></script>
+<script src="vendor/GLTFLoader.js"></script>
+<script>
+(function () {
+  'use strict';
+  /* ---------------- 왼쪽: 실사 영상 ---------------- */
+  var CLIPS = [['idle', '대기'], ['front_c', '앞줄 앙'], ['back_r', '뒷줄 앙'], ['feint', '가짜'], ['chew', '냠냠']];
+  var vstage = document.getElementById('vstage'), vbtns = document.getElementById('vbtns'), VID = {}, curV = null;
+  CLIPS.forEach(function (c) {
+    var v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; v.setAttribute('playsinline', ''); v.setAttribute('muted', '');
+    v.innerHTML = '<source src="real/shiba/' + c[0] + '.webm" type="video/webm"><source src="real/shiba/' + c[0] + '.mp4" type="video/mp4">';
+    v.loop = c[0] === 'idle'; v.onended = function () { show('idle'); };
+    vstage.appendChild(v); VID[c[0]] = v;
+    var b = document.createElement('button'); b.textContent = c[1]; b.dataset.k = c[0]; b.onclick = function () { show(c[0]); }; vbtns.appendChild(b);
+  });
+  function show(k) {
+    var v = VID[k]; try { v.currentTime = 0; } catch (e) { /* 무시 */ }
+    var p = v.play(); if (p && p.catch) p.catch(function () { /* 무시 */ });
+    Object.keys(VID).forEach(function (o) { VID[o].classList.toggle('on', o === k); if (o !== k) VID[o].pause(); });
+    [].forEach.call(vbtns.children, function (b) { b.classList.toggle('on', b.dataset.k === k); }); curV = k;
+  }
+  show('idle');
+
+  /* ---------------- 오른쪽: 3D (three.js) ---------------- */
+  var status = document.getElementById('status'), cv = document.getElementById('cv3'), tstage = document.getElementById('tstage');
+  window.cmp = { ready: false, err: null, bites: 0, spot: null };
+  if (!window.THREE || !THREE.GLTFLoader) { status.textContent = '3D 라이브러리를 불러오지 못했어요'; window.cmp.err = 'no three'; return; }
+  var renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: true });
+  renderer.outputEncoding = THREE.sRGBEncoding; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  var scene = new THREE.Scene();
+  var cam = new THREE.PerspectiveCamera(58, 9 / 16, 0.01, 50);
+  cam.position.set(0, 0.07, 0.25); cam.lookAt(0, 0.2, -0.6);   // 잔디에 놓인 낮은 카메라, 살짝 올려다봄
+
+  // 하늘 그라데이션 + 먼 생울타리 띠
+  (function () {
+    var c = document.createElement('canvas'); c.width = 4; c.height = 256; var x = c.getContext('2d'), g = x.createLinearGradient(0, 0, 0, 256);
+    g.addColorStop(0, '#4f8fdc'); g.addColorStop(0.55, '#9cc8f3'); g.addColorStop(0.62, '#3f7a3a'); g.addColorStop(0.8, '#2f6a2c'); g.addColorStop(1, '#2f6a2c');
+    x.fillStyle = g; x.fillRect(0, 0, 4, 256); var t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; scene.background = t;
+  })();
+  // 잔디 바닥: 결이 있는 초록 텍스처를 그려서 반복
+  (function () {
+    var c = document.createElement('canvas'); c.width = c.height = 256; var x = c.getContext('2d');
+    x.fillStyle = '#4f9a35'; x.fillRect(0, 0, 256, 256);
+    for (var i = 0; i < 2600; i++) { var px = Math.random() * 256, py = Math.random() * 256, l = 4 + Math.random() * 9, s = 40 + Math.random() * 40; x.strokeStyle = 'hsl(' + (88 + Math.random() * 30) + ',' + s + '%,' + (24 + Math.random() * 30) + '%)'; x.lineWidth = 1 + Math.random(); x.beginPath(); x.moveTo(px, py); x.lineTo(px + (Math.random() - 0.5) * 3, py - l); x.stroke(); }
+    var t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(10, 10); t.encoding = THREE.sRGBEncoding; t.anisotropy = 4;
+    var g = new THREE.Mesh(new THREE.PlaneGeometry(6, 6), new THREE.MeshStandardMaterial({ map: t, roughness: 1 }));
+    g.rotation.x = -Math.PI / 2; g.receiveShadow = true; scene.add(g);
+  })();
+  scene.add(new THREE.HemisphereLight(0xdfefff, 0x4f7a32, 0.9));
+  var sun = new THREE.DirectionalLight(0xfff4e0, 1.6); sun.position.set(0.8, 2.2, 1.2); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.camera.left = -1; sun.shadow.camera.right = 1; sun.shadow.camera.top = 1; sun.shadow.camera.bottom = -1; scene.add(sun);
+
+  // 6칸 (3열 × 앞·뒤 줄) — 땅 위 좌표(m). 앞줄은 카메라에 가깝다
+  var SPOTS = [];
+  [['뒷줄', -0.3], ['앞줄', -0.14]].forEach(function (row, ri) { [-0.13, 0, 0.13].forEach(function (x, ci) { SPOTS.push({ name: row[0] + ' ' + ['왼', '가운데', '오른'][ci], x: x, z: row[1], r: ri, c: ci }); }); });
+  var cookieMat = new THREE.MeshStandardMaterial({ color: 0xc98a4b, roughness: 0.8 });
+  var cookie = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.012, 24), cookieMat); cookie.castShadow = true; cookie.visible = false; scene.add(cookie);
+  var tgrid = document.getElementById('tgrid');
+  SPOTS.forEach(function (sp, i) { var b = document.createElement('button'); b.textContent = sp.name; b.onclick = function () { bite(i); }; tgrid.appendChild(b); });
+  var tbtns = document.getElementById('tbtns');
+  [['가짜', function () { feint(); }], ['대기', function () { act = null; }]].forEach(function (d) { var b = document.createElement('button'); b.textContent = d[0]; b.onclick = d[1]; tbtns.appendChild(b); });
+
+  /* 모델: 리깅이 없어(Meshy 동작 목록에 네발 동작 없음) 목·머리 정점을 직접 굽힌다.
+     머리 쪽 정점마다 무게 w(목→코로 갈수록 1)를 두고, 목 기준점을 중심으로 회전(좌우·숙임·갸웃)을 w만큼 준다. */
+  var DOG = null, HEIGHT = 0.34, REST_Z = -0.5, QS0 = new URLSearchParams(location.search);
+  var MODEL = (new URLSearchParams(location.search)).get('model') || 'real/shiba/shiba.glb';
+  function smooth(a, b, x) { var t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
+  new THREE.GLTFLoader().load(MODEL, function (gltf) {
+    var root = gltf.scene, box = new THREE.Box3().setFromObject(root), size = box.getSize(new THREE.Vector3());
+    root.scale.setScalar(HEIGHT / size.y); root.updateMatrixWorld(true); box.setFromObject(root);
+    var c = box.getCenter(new THREE.Vector3()); root.position.set(-c.x, -box.min.y, -c.z);
+    var wrap = new THREE.Group(); wrap.add(root); scene.add(wrap); wrap.updateMatrixWorld(true);
+    // 몸 길이 축과 머리 쪽(더 높은 끝) 찾기 → 머리가 카메라(+z)를 보게 돌림
+    var pts = []; root.traverse(function (o) { if (o.isMesh) { var p = o.geometry.attributes.position; for (var i = 0; i < p.count; i += 11) pts.push(new THREE.Vector3().fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld)); } });
+    var bb = new THREE.Box3().setFromPoints(pts), axis = (bb.max.x - bb.min.x) > (bb.max.z - bb.min.z) ? 'x' : 'z', lo = bb.min[axis], len = bb.max[axis] - lo, tLo = -1, tHi = -1;
+    pts.forEach(function (p) { var u = (p[axis] - lo) / len; if (u < 0.22) tLo = Math.max(tLo, p.y); if (u > 0.78) tHi = Math.max(tHi, p.y); });
+    var hs = tHi > tLo ? 1 : -1, yaw = axis === 'x' ? (hs > 0 ? Math.PI / 2 : -Math.PI / 2) : (hs > 0 ? 0 : Math.PI);
+    if (axis === 'x') yaw = -yaw;   // x축이 몸 길이면: +x 머리 → -90°로 돌려야 +z
+    if (QS.get('yaw')) yaw = +QS.get('yaw');
+    wrap.rotation.y = yaw; wrap.position.z = REST_Z; wrap.updateMatrixWorld(true);
+    // 개 좌표계(wrap 안, 머리 = +z)에서 정점 위치·무게
+    var inv = new THREE.Matrix4().copy(wrap.matrixWorld).invert(), all = [], meshes = [];
+    root.traverse(function (o) {
+      if (!o.isMesh) return; o.castShadow = true; o.frustumCulled = false;
+      var g = o.geometry;
+      ['position', 'normal'].forEach(function (k) {   // 위치·법선·UV가 한 버퍼에 섞여 있으면(interleaved) 따로 떼어 냄
+        var at = g.attributes[k]; if (!at || !at.isInterleavedBufferAttribute) return;
+        var arr = new Float32Array(at.count * 3); for (var i = 0; i < at.count; i++) { arr[i * 3] = at.getX(i); arr[i * 3 + 1] = at.getY(i); arr[i * 3 + 2] = at.getZ(i); }
+        g.setAttribute(k, new THREE.BufferAttribute(arr, 3));
+      });
+      var P = g.attributes.position, N = g.attributes.normal, M = new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld), Mi = new THREE.Matrix4().copy(M).invert();
+      var d0 = new Float32Array(P.count * 3), n0 = N ? new Float32Array(P.count * 3) : null, v = new THREE.Vector3(), nm = new THREE.Matrix3().getNormalMatrix(M);
+      for (var i = 0; i < P.count; i++) { v.fromBufferAttribute(P, i).applyMatrix4(M); d0[i * 3] = v.x; d0[i * 3 + 1] = v.y; d0[i * 3 + 2] = v.z; if (N) { v.fromBufferAttribute(N, i).applyMatrix3(nm).normalize(); n0[i * 3] = v.x; n0[i * 3 + 1] = v.y; n0[i * 3 + 2] = v.z; } }
+      meshes.push({ o: o, P: P, N: N, d0: d0, n0: n0, Mi: Mi, nmi: new THREE.Matrix3().getNormalMatrix(Mi), bin: new Uint8Array(P.count) });
+      all.push(d0);
+    });
+    var zMin = 1e9, zMax = -1e9, yMax = -1e9; all.forEach(function (d) { for (var i = 0; i < d.length; i += 3) { zMin = Math.min(zMin, d[i + 2]); zMax = Math.max(zMax, d[i + 2]); yMax = Math.max(yMax, d[i + 1]); } });
+    var L = zMax - zMin, zS = zMax - L * 0.3, yC = yMax * 0.52, piv = new THREE.Vector3(0, yMax * 0.66, zS), nose = new THREE.Vector3(0, 0, -1e9);
+    meshes.forEach(function (m) {
+      for (var i = 0; i < m.bin.length; i++) {
+        var y = m.d0[i * 3 + 1], z = m.d0[i * 3 + 2], w = smooth(zS - 0.005, zS + L * 0.07, z) * smooth(yC + 0.01, yC + 0.05, y);
+        m.bin[i] = Math.round(w * 15);
+        if (w > 0.95 && z > nose.z) nose.set(m.d0[i * 3], y, z);
+      }
+    });
+    DOG = { wrap: wrap, meshes: meshes, piv: piv, nose: nose, L: L, H: yMax, yaw: yaw };
+    window.cmp.ready = true; window.cmp.orient = { axis: axis, headSign: hs, yaw: +yaw.toFixed(2), L: +L.toFixed(3), H: +yMax.toFixed(3), nose: [nose.x, nose.y, nose.z].map(function (x) { return +x.toFixed(3); }), verts: meshes.reduce(function (a, m) { return a + m.bin.length; }, 0) };
+    status.textContent = '6칸 중 하나를 눌러 보세요'; pose(REST);
+  }, undefined, function (e) { window.cmp.err = String(e && e.message || e); status.textContent = '3D 모델을 불러오지 못했어요'; });
+
+  /* 자세: 몸 이동(ox, oz)·몸 낮춤(dy)·머리 회전(좌우 yaw, 숙임 pitch, 갸웃 roll) */
+  var REST = { ox: 0, oz: 0, dy: 0, yaw: 0, pitch: 0, roll: 0 }, R16 = [], tmp = new THREE.Vector3();
+  var QS = new URLSearchParams(location.search);
+  function pose(p) {
+    if (!DOG) return;
+    if (QS.get('nodeform') === '1') { DOG.wrap.position.set(p.ox, p.dy, REST_Z + p.oz); return; }
+    DOG.wrap.position.set(p.ox, p.dy, REST_Z + p.oz);
+    for (var k = 0; k < 16; k++) { var w = k / 15; R16[k] = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(p.pitch * w, p.yaw * w, p.roll * w, 'YXZ')); }
+    var pv = DOG.piv;
+    DOG.meshes.forEach(function (m) {
+      var d = m.d0, n = m.n0, P = m.P.array, N = m.N ? m.N.array : null, e = m.Mi.elements, f = m.nmi.elements;
+      for (var i = 0, c = m.bin.length; i < c; i++) {
+        var R = R16[m.bin[i]].elements, x = d[i * 3] - pv.x, y = d[i * 3 + 1] - pv.y, z = d[i * 3 + 2] - pv.z;
+        var X = R[0] * x + R[4] * y + R[8] * z + pv.x, Y = R[1] * x + R[5] * y + R[9] * z + pv.y, Z = R[2] * x + R[6] * y + R[10] * z + pv.z;
+        P[i * 3] = e[0] * X + e[4] * Y + e[8] * Z + e[12]; P[i * 3 + 1] = e[1] * X + e[5] * Y + e[9] * Z + e[13]; P[i * 3 + 2] = e[2] * X + e[6] * Y + e[10] * Z + e[14];
+        if (N) { var a = n[i * 3], b = n[i * 3 + 1], cc = n[i * 3 + 2], nx = R[0] * a + R[4] * b + R[8] * cc, ny = R[1] * a + R[5] * b + R[9] * cc, nz = R[2] * a + R[6] * b + R[10] * cc;
+          N[i * 3] = f[0] * nx + f[3] * ny + f[6] * nz; N[i * 3 + 1] = f[1] * nx + f[4] * ny + f[7] * nz; N[i * 3 + 2] = f[2] * nx + f[5] * ny + f[8] * nz; }
+      }
+      m.P.needsUpdate = true; if (m.N) m.N.needsUpdate = true;
+    });
+  }
+  /** 코가 땅의 칸(tx, tz)에 닿는 자세: 머리를 그쪽으로 돌리고 숙이며, 모자라는 거리만큼 몸이 앞으로 나간다 */
+  function reach(tx, tz) {
+    var pv = DOG.piv, v0 = DOG.nose.clone().sub(pv), lx = tx, lz = tz - REST_Z, dy = -0.02, best = null;
+    for (var th = 0; th <= 1.5; th += 0.01) {   // 숙임 각도: 코 높이가 땅(약 1.5cm)에 오는 각
+      var vy = v0.y * Math.cos(th) - v0.z * Math.sin(th), vh = v0.y * Math.sin(th) + v0.z * Math.cos(th);
+      if (pv.y + dy + vy <= 0.015) { best = { th: th, vh: vh }; break; }
+    }
+    if (!best) best = { th: 1.5, vh: 0.02 };
+    var hx = lx - pv.x, hz = lz - pv.z, hd = Math.hypot(hx, hz) || 1e-6, ux = hx / hd, uz = hz / hd, move = Math.max(0, hd - best.vh);
+    return { ox: ux * move, oz: uz * move, dy: dy, yaw: Math.atan2(ux, uz), pitch: best.th, roll: 0 };
+  }
+  function mix(a, b, t) { var o = {}; for (var k in a) o[k] = a[k] + (b[k] - a[k]) * t; return o; }
+  function ease(t) { return t * t * (3 - 2 * t); }
+  var act = null, T0 = 0;
+  function bite(i) {
+    if (!DOG) return; var sp = SPOTS[i]; window.cmp.spot = i;
+    cookie.position.set(sp.x, 0.006, sp.z); cookie.visible = true; cookie.scale.set(1, 1, 1);
+    act = { kind: 'bite', sp: sp, tgt: reach(sp.x, sp.z), t: 0, done: false };
+  }
+  function feint() { if (!DOG) return; act = { kind: 'feint', tgt: reach(0, -0.22), t: 0 }; cookie.visible = false; }
+  function step(dt) {
+    if (!DOG) return;
+    var t = performance.now() / 1000, idle = mix(REST, { ox: 0, oz: 0, dy: Math.sin(t * 3.1) * 0.0015, yaw: Math.sin(t * 0.9) * 0.08, pitch: 0.05 + Math.sin(t * 1.7) * 0.03, roll: Math.sin(t * 0.7) * 0.05 }, 1);
+    if (!act) { pose(idle); return; }
+    act.t += dt; var a = act, k = a.t, P;
+    var up = mix(REST, { ox: 0, oz: -0.01, dy: 0, yaw: a.tgt.yaw * 0.4, pitch: -0.18, roll: 0 }, 1);   // 예비 동작: 고개를 살짝 들고 겨눔
+    if (a.kind === 'bite') {
+      if (k < 0.22) P = mix(idle, up, ease(k / 0.22));
+      else if (k < 0.4) P = mix(up, a.tgt, Math.pow((k - 0.22) / 0.18, 1.6));   // 앙!
+      else if (k < 0.85) { P = mix(a.tgt, a.tgt, 0); P.pitch += Math.sin(k * 40) * 0.03; if (!a.done) { a.done = true; cookie.visible = false; window.cmp.bites++; } }   // 냠냠
+      else if (k < 1.35) P = mix(a.tgt, idle, ease((k - 0.85) / 0.5));
+      else { act = null; cookie.visible = true; P = idle; }
+    } else {
+      var half = mix(REST, a.tgt, 0.55);
+      if (k < 0.5) P = mix(idle, half, ease(k / 0.5));
+      else if (k < 1.3) { P = mix(half, half, 0); P.roll = Math.sin(Math.min(1, (k - 0.5) / 0.3) * Math.PI / 2) * 0.38; P.pitch -= 0.12 * Math.min(1, (k - 0.5) / 0.3); }   // 멈칫 → 갸웃
+      else if (k < 1.8) { var hp = mix(half, half, 0); hp.roll = 0.38; hp.pitch -= 0.12; P = mix(hp, idle, ease((k - 1.3) / 0.5)); }
+      else { act = null; P = idle; }
+    }
+    pose(P);
+  }
+  function resize() { var r = tstage.getBoundingClientRect(); renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); renderer.setSize(r.width, r.height, false); cam.aspect = r.width / r.height; cam.updateProjectionMatrix(); }
+  window.addEventListener('resize', resize); resize();
+  var last = performance.now();
+  (function loop(now) { requestAnimationFrame(loop); now = now || performance.now(); var dt = Math.min(0.05, (now - last) / 1000); last = now; step(dt); renderer.render(scene, cam); })();
+  window.cmp.bite = bite; window.cmp.feint = feint;
+})();
+</script>
+</body>
+</html>
