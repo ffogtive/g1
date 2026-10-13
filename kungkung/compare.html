@@ -56,12 +56,12 @@
       <p class="note">AI 영상 클립 5개(각 35크레딧). 칸마다 클립이 필요해요(3열×2줄이면 앙 4개 + 반전).</p>
     </section>
     <section class="panel">
-      <h2>3D 모델 <span class="cost">종당 약 80크레딧</span></h2>
+      <h2>3D 모델 <span class="cost">종당 약 35 Meshy 크레딧</span></h2>
       <div class="stage" id="tstage"><canvas id="cv3"></canvas></div>
       <div class="grid6" id="tgrid"></div>
       <div class="btns" id="tbtns"></div>
       <p id="status">3D 모델 불러오는 중…</p>
-      <p class="note">Meshy 7 이미지→3D 모델(38크레딧, 정점 7.7만, 텍스처 1024). <b>리깅이 없어</b> 고개 숙이기를 코드로 목 정점을 굽혀 만들었더니 앙 할 때 머리 뒤가 고무처럼 늘어나요. 제대로 하려면 네발 리깅 + 물기 동작을 따로 만들어야 해요.</p>
+      <p class="note">Meshy API로 만든 모델(이미지→3D 30 + 자동 리깅 5 Meshy 크레딧). 자동 리깅 뼈대가 <b>사람형</b>이라 목·머리 뼈로 고개 숙이기는 되지만, 다리 뼈가 엉뚱하게 붙어 다리를 굽히지 못해 코가 땅까지 못 내려가요. 같이 온 걷기·뛰기도 사람 걸음이에요. 제대로 하려면 네발용 뼈대·물기 동작을 따로 만들어야 해요.</p>
     </section>
   </div>
   <section class="verdict">
@@ -69,8 +69,8 @@
     <table>
       <tr><th>실사감·귀여움</th><td>영상: 진짜 강아지 그대로 (털·눈빛·혀)<br>3D: 모양은 시바지만 털 질감·표정은 덜 살아 있음</td></tr>
       <tr><th>앞뒤·대각선</th><td>영상: 칸마다 클립 필요, 뒷줄 앙도 영상으로 됨<br>3D: 각도·칸이 자유, 연출을 코드로 바로 바꿈</td></tr>
-      <tr><th>20종 비용</th><td>영상 약 8,500 · 3D 약 1,600 (먹이 캐릭터 3D 약 470은 공통)</td></tr>
-      <tr><th>이번 시험 결과</th><td>영상: 5개 모두 한 번에 성공, <b>뒷줄 앙도 됨</b>(자기 발 옆 잔디를 물고, 멀어서 머리가 작게 보임)<br>3D: 서 있는 모습은 그럴듯하지만, 리깅 없이 굽힌 앙은 머리가 늘어나 어색함</td></tr>
+      <tr><th>20종 비용</th><td>영상: Higgsfield 약 8,500 · 3D: Meshy 약 700(종당 35) + 네발 뼈대·동작 수작업<br>먹이 캐릭터 3D는 둘 다 Meshy로(12종 약 360)</td></tr>
+      <tr><th>이번 시험 결과</th><td>영상: 5개 모두 한 번에 성공, <b>뒷줄 앙도 됨</b>(자기 발 옆 잔디를 물고, 멀어서 머리가 작게 보임)<br>3D: 서 있는 모습은 그럴듯함. 자동 리깅은 사람형 뼈대라 고개만 숙일 수 있고, 앙·엎드리기·걷기는 어색함</td></tr>
       <tr><th>위험</th><td>영상: 클립마다 결과가 들쭉날쭉해 재시도가 필요<br>3D: 네발 리깅·물기 동작 제작이 따로 필요하고, 털 질감이 약해 "AB2급 귀여움"에 못 미칠 수 있음</td></tr>
     </table>
   </section>
@@ -130,7 +130,7 @@
 
   // 6칸 (3열 × 앞·뒤 줄) — 땅 위 좌표(m). 앞줄은 카메라에 가깝다
   var SPOTS = [];
-  [['뒷줄', -0.3], ['앞줄', -0.14]].forEach(function (row, ri) { [-0.13, 0, 0.13].forEach(function (x, ci) { SPOTS.push({ name: row[0] + ' ' + ['왼', '가운데', '오른'][ci], x: x, z: row[1], r: ri, c: ci }); }); });
+  [['뒷줄', -0.62], ['앞줄', -0.42]].forEach(function (row, ri) { [-0.13, 0, 0.13].forEach(function (x, ci) { SPOTS.push({ name: row[0] + ' ' + ['왼', '가운데', '오른'][ci], x: x, z: row[1], r: ri, c: ci }); }); });
   var cookieMat = new THREE.MeshStandardMaterial({ color: 0xc98a4b, roughness: 0.8 });
   var cookie = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.012, 24), cookieMat); cookie.castShadow = true; cookie.visible = false; scene.add(cookie);
   var tgrid = document.getElementById('tgrid');
@@ -141,9 +141,11 @@
   /* 모델: 리깅이 없어(Meshy 동작 목록에 네발 동작 없음) 목·머리 정점을 직접 굽힌다.
      머리 쪽 정점마다 무게 w(목→코로 갈수록 1)를 두고, 목 기준점을 중심으로 회전(좌우·숙임·갸웃)을 w만큼 준다. */
   var DOG = null, HEIGHT = 0.34, REST_Z = -0.5, QS0 = new URLSearchParams(location.search);
-  var MODEL = (new URLSearchParams(location.search)).get('model') || 'real/shiba/shiba.glb';
+  var MODEL = (new URLSearchParams(location.search)).get('model') || 'real/shiba/shiba_rig.gltf.json';
   function smooth(a, b, x) { var t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
   new THREE.GLTFLoader().load(MODEL, function (gltf) {
+    var bones = {}; gltf.scene.traverse(function (o) { if (o.isBone) bones[o.name] = o; });
+    if (bones.neck && bones.Head && bones.headfront) return setupBones(gltf.scene, bones);
     var root = gltf.scene, box = new THREE.Box3().setFromObject(root), size = box.getSize(new THREE.Vector3());
     root.scale.setScalar(HEIGHT / size.y); root.updateMatrixWorld(true); box.setFromObject(root);
     var c = box.getCenter(new THREE.Vector3()); root.position.set(-c.x, -box.min.y, -c.z);
@@ -186,11 +188,40 @@
     status.textContent = '6칸 중 하나를 눌러 보세요'; pose(REST);
   }, undefined, function (e) { window.cmp.err = String(e && e.message || e); status.textContent = '3D 모델을 불러오지 못했어요'; });
 
+  /* Meshy API 자동 리깅 모델: 뼈대는 사람형(24관절)이라 다리는 못 쓰지만, 목(neck)·머리(Head) 뼈는 제자리라
+     고개 숙이기를 뼈로 한다 → 정점을 직접 굽힐 때처럼 머리가 늘어나지 않는다. 몸은 앞으로 나가며 살짝 숙인다. */
+  function setupBones(root, bones) {
+    REST_Z = -0.95;   // 리깅 모델은 실제 크기(키 약 40cm)라 영상과 비슷하게 보이도록 조금 멀리
+    var wrap = new THREE.Group(); wrap.add(root); scene.add(wrap); wrap.position.z = REST_Z; wrap.updateMatrixWorld(true);
+    root.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+    var inv = new THREE.Matrix4().copy(wrap.matrixWorld).invert();
+    function local(b) { return b.getWorldPosition(new THREE.Vector3()).applyMatrix4(inv); }
+    var piv = local(bones.neck), nose = local(bones.headfront), head = local(bones.Head);
+    DOG = { mode: 'bones', wrap: wrap, bones: bones, rest: { neck: bones.neck.quaternion.clone(), Head: bones.Head.quaternion.clone() }, piv: piv, nose: nose, H: head.y };
+    window.cmp.ready = true; window.cmp.orient = { mode: 'bones', neck: [piv.x, piv.y, piv.z].map(function (x) { return +x.toFixed(3); }), nose: [nose.x, nose.y, nose.z].map(function (x) { return +x.toFixed(3); }) };
+    status.textContent = '6칸 중 하나를 눌러 보세요'; pose(REST);
+  }
+  var qW = new THREE.Quaternion(), qP = new THREE.Quaternion(), qD = new THREE.Quaternion(), eD = new THREE.Euler();
+  function turnBone(b, restQ, pitch, yaw, roll) {   // 개 좌표(머리 = +z)에서 준 회전을 뼈의 자기 좌표로 바꿔 적용
+    b.quaternion.copy(restQ); b.updateMatrixWorld(true);
+    b.parent.getWorldQuaternion(qP); qW.copy(qP).multiply(b.quaternion);
+    DOG.wrap.getWorldQuaternion(qD); var wq = qD.clone();
+    var d = new THREE.Quaternion().setFromEuler(eD.set(pitch, yaw, roll, 'YXZ'));
+    var dw = wq.clone().multiply(d).multiply(wq.clone().invert());
+    b.quaternion.copy(qP.clone().invert().multiply(dw.multiply(qW))); b.updateMatrixWorld(true);
+  }
+  function poseBones(p) {
+    var w = DOG.wrap; w.position.set(p.ox, p.dy, REST_Z + p.oz); w.rotation.x = Math.max(0, p.pitch) * 0.18;   // 몸도 살짝 앞으로 숙임
+    w.updateMatrixWorld(true);
+    turnBone(DOG.bones.neck, DOG.rest.neck, p.pitch * 0.55, p.yaw * 0.6, 0);
+    turnBone(DOG.bones.Head, DOG.rest.Head, p.pitch * 0.45, p.yaw * 0.4, p.roll);
+  }
   /* 자세: 몸 이동(ox, oz)·몸 낮춤(dy)·머리 회전(좌우 yaw, 숙임 pitch, 갸웃 roll) */
   var REST = { ox: 0, oz: 0, dy: 0, yaw: 0, pitch: 0, roll: 0 }, R16 = [], tmp = new THREE.Vector3();
   var QS = new URLSearchParams(location.search);
   function pose(p) {
     if (!DOG) return;
+    if (DOG.mode === 'bones') { poseBones(p); return; }
     if (QS.get('nodeform') === '1') { DOG.wrap.position.set(p.ox, p.dy, REST_Z + p.oz); return; }
     DOG.wrap.position.set(p.ox, p.dy, REST_Z + p.oz);
     for (var k = 0; k < 16; k++) { var w = k / 15; R16[k] = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(p.pitch * w, p.yaw * w, p.roll * w, 'YXZ')); }
@@ -209,6 +240,10 @@
   }
   /** 코가 땅의 칸(tx, tz)에 닿는 자세: 머리를 그쪽으로 돌리고 숙이며, 모자라는 거리만큼 몸이 앞으로 나간다 */
   function reach(tx, tz) {
+    if (DOG.mode === 'bones') {   // 다리를 못 굽혀 코가 땅까지는 못 감: 그쪽으로 나가며 고개를 깊이 숙여 앙
+      var dx = tx, dz = tz - REST_Z - DOG.nose.z, d = Math.hypot(dx, dz) || 1e-6, mv = Math.max(0, d - 0.06);
+      return { ox: dx / d * mv, oz: dz / d * mv, dy: -0.03, yaw: Math.atan2(dx, Math.max(0.05, dz)) * 0.8, pitch: 0.95, roll: 0 };
+    }
     var pv = DOG.piv, v0 = DOG.nose.clone().sub(pv), lx = tx, lz = tz - REST_Z, dy = -0.02, best = null;
     for (var th = 0; th <= 1.5; th += 0.01) {   // 숙임 각도: 코 높이가 땅(약 1.5cm)에 오는 각
       var vy = v0.y * Math.cos(th) - v0.z * Math.sin(th), vh = v0.y * Math.sin(th) + v0.z * Math.cos(th);
@@ -229,7 +264,7 @@
   function feint() { if (!DOG) return; act = { kind: 'feint', tgt: reach(0, -0.22), t: 0 }; cookie.visible = false; }
   function step(dt) {
     if (!DOG) return;
-    var t = performance.now() / 1000, idle = mix(REST, { ox: 0, oz: 0, dy: Math.sin(t * 3.1) * 0.0015, yaw: Math.sin(t * 0.9) * 0.08, pitch: 0.05 + Math.sin(t * 1.7) * 0.03, roll: Math.sin(t * 0.7) * 0.05 }, 1);
+    var t = performance.now() / 1000, idle = mix(REST, { ox: 0, oz: 0, dy: Math.sin(t * 3.1) * 0.0015, yaw: Math.sin(t * 0.9) * 0.06, pitch: 0.3 + Math.sin(t * 1.7) * 0.04, roll: Math.sin(t * 0.7) * 0.05 }, 1);   // 평소: 쿠키 쪽(아래)을 내려다봄
     if (!act) { pose(idle); return; }
     act.t += dt; var a = act, k = a.t, P;
     var up = mix(REST, { ox: 0, oz: -0.01, dy: 0, yaw: a.tgt.yaw * 0.4, pitch: -0.18, roll: 0 }, 1);   // 예비 동작: 고개를 살짝 들고 겨눔
