@@ -139,7 +139,7 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
       const q = await T.waitFor('q.atk && q.atk.step === "tell"', 8000), buf0 = await T.page.screenshot();
       const qs = await T.waitFor('q.atk && q.atk.step === "stamp" && q.freeze === 1', 12000);
       const buf = await T.page.screenshot({ path: `${OUT}/${SP}-pix-${cell}.png` });
-      const a0 = qs ? await patch(T.page, buf0, qs.bite.sx, qs.bite.sy - 8) : [0, 0, 0], a1 = qs ? await patch(T.page, buf, qs.bite.sx, qs.bite.sy - 8) : [0, 0, 0];
+      const a0 = qs ? await patch(T.page, buf0, qs.bite.sx, qs.bite.sy - 22) : [0, 0, 0], a1 = qs ? await patch(T.page, buf, qs.bite.sx, qs.bite.sy - 22) : [0, 0, 0];   // 무는 점 바로 위(머리·부리 밑동): 타조 부리 끝은 마른 풀과 색이 비슷
       ok(`${tag} 픽셀 ${cell}: 무는 점에 머리(대기 장면과 색 차 ≥ 40)`, q && qs && cdiff(a0, a1) >= 40, JSON.stringify({ idle: a0, bite: a1, d: cdiff(a0, a1) }));
       await T.close();
     }
