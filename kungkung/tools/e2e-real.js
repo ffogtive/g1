@@ -16,7 +16,7 @@ const results = [];
 const ok = (name, cond, info) => { results.push([cond ? 'PASS' : 'FAIL', name]); console.log(cond ? 'PASS' : 'FAIL', name, info == null ? '' : info); };
 const CELLS = ['F0', 'F1', 'F2', 'B0', 'B1', 'B2'];
 const WANT = { F0: ['fr', 1], F1: ['fc', 0], F2: ['fr', 0], B0: ['bl', 0], B1: ['bc', 0], B2: ['bl', 1] };
-const FILES = { grey: 15, ostrich: 14 };
+const FILES = { grey: 15, ostrich: 15 };
 
 /** 영상 구간 탐색(Range)까지 되는 작은 정적 서버 */
 function serve() {
@@ -61,7 +61,7 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
   const srv = process.env.BASE_URL ? null : await serve(), BASE = process.env.BASE_URL ? process.env.BASE_URL.replace(/\/$/, '') + '/' + PAGE : `http://127.0.0.1:${srv.address().port}/${PAGE}`;
   const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] });
   const errs = []; let F2 = 0;
-  const V = { cuts: [], late: 0, tellCuts: 0, minCover: 1, seekLive: 0, resync: 0, seeks: [] };   // 끊김 지표 (모든 판 합산)
+  const V = { cuts: [], late: 0, tellCuts: 0, minCover: 1, seekLive: 0, resync: 0, seeks: [], waitMax: 0, slow: 0 };   // 끊김 지표 (모든 판 합산)
   async function open(q) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true });
     const page = await ctx.newPage();
@@ -69,7 +69,7 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
     await page.goto(BASE + q);
     const cdp = await ctx.newCDPSession(page);
     const T = { ctx, page, fx: 195, fy: 760, down: false, fw: 105,
-      touch: (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x: Math.round(x), y: Math.round(y) }] }),
+      cdp, touch: (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x: Math.round(x), y: Math.round(y), id: 0 }] }),
       snap: () => page.evaluate(() => window.kung.snapshot()),
       waitFor: (src, to = 15000) => page.evaluate(([src, to]) => new Promise(res => { const f = new Function('q', 'return ' + src); const t0 = performance.now(); (function loop() { const q = window.kung.snapshot(); if (f(q)) return res(q); if (performance.now() - t0 > to) return res(null); requestAnimationFrame(loop); })(); }), [src, to]) };
     T.tap = async (x, y) => { await T.touch('touchStart', x, y); await T.touch('touchEnd'); };
@@ -96,7 +96,7 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
     };
     T.close = async () => {
       const q = await T.snap(), vl = await page.evaluate(() => window.kung.vlog());
-      F2 += q.warnF2; V.late += q.vstat.late; V.tellCuts += q.vstat.tellCuts; V.minCover = Math.min(V.minCover, q.vstat.minCover); V.seekLive += q.vstat.seekLive; V.resync += q.vstat.resync;
+      F2 += q.warnF2; V.late += q.vstat.late; V.waitMax = Math.max(V.waitMax, q.vstat.waitMax || 0); V.slow += q.vstat.slow || 0; V.tellCuts += q.vstat.tellCuts; V.minCover = Math.min(V.minCover, q.vstat.minCover); V.seekLive += q.vstat.seekLive; V.resync += q.vstat.resync;
       vl.filter(e => e.k === 'cut').forEach(e => V.cuts.push(e));
       vl.filter(e => e.k === 'seek' || e.k === 'resync').forEach(e => V.seeks.push(Object.assign({ page: page.url().split('?')[1] }, e)));
       await ctx.close();
@@ -105,7 +105,7 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
     return T;
   }
   /** 두 손가락 터치 (CDP touchPoints 여러 개) */
-  async function cdp2(T, pts, type) { const s = await T.ctx.newCDPSession(T.page); await s.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((p, i) => ({ x: p.x, y: p.y, id: i })) }); }
+  async function cdp2(T, pts, type) { await T.cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((p, i) => ({ x: p.x, y: p.y, id: i })) }); }
   /** 자동 피하기: 빨간 구간이 쿠키 줄에 걸리면 가장 가까운 안전한 (X, 줄)로 (대각선 허용) */
   async function autoDodge(T, until, maxMs) {
     const t0 = Date.now(); let q;
@@ -372,6 +372,7 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
     const bad = V.cuts.filter(e => Math.abs(e.mt - e.from) > 0.07);
     ok('끊김: 전환마다 새 층의 첫 프레임이 목표 시각 ±0.07초', V.cuts.length > 40 && bad.length === 0, `cuts=${V.cuts.length} bad=${JSON.stringify(bad.slice(0, 3))}`);
     ok('끊김: 준비가 늦어 그냥 보여준 전환 0', V.late === 0, 'late=' + V.late);
+    ok('끊김: 새 층 공개까지 0.1초 넘게 기다린 전환 2% 이하 (아이폰은 더 느리니 여기서 여유를 봄)', V.slow <= Math.max(1, V.cuts.length * 0.02), `slow=${V.slow} / cuts=${V.cuts.length}, 가장 오래 ${V.waitMax}s`);
     ok('끊김: 예고(킁킁) 중 클립 전환 0', V.tellCuts === 0, 'tellCuts=' + V.tellCuts);
     ok('끊김: 페이드 중에도 화면이 늘 덮임', V.minCover >= 0.99, 'minCover=' + V.minCover);
     ok('끊김: 보이는 영상을 그 자리에서 되감거나 다시 맞춘 횟수 0', V.seekLive === 0 && V.resync === 0, `seekLive=${V.seekLive} resync=${V.resync} ` + JSON.stringify(V.seeks.slice(0, 4)));
