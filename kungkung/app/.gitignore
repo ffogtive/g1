@@ -51,3 +51,7 @@ app.*.map.json
 /assets/web/**
 !/assets/web/**/
 !/assets/web/**/.gitkeep
+
+# 아이폰 설치 스크립트(tool/deploy-iphone.command)의 빌드·로그, 개인 설정(팀·기기 ID)은 깃에 올리지 않는다
+/.local/
+/tool/deploy.local

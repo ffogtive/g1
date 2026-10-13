@@ -8,6 +8,28 @@
 
 그래서 웹 쪽을 고친 뒤 `tool/sync_web.sh`만 다시 돌리면 앱에 그대로 들어간다.
 
+## 가장 쉬운 설치·업데이트 (Mac에서 더블클릭)
+
+**가설:** 서명 팀과 아이폰을 Mac이 스스로 찾고, 빌드부터 설치·실행까지 한 번에 하면 업데이트는 `git pull` 뒤 더블클릭 한 번이다.
+
+```bash
+cd g1 && git pull           # 받은 뒤
+open kungkung/app/tool      # Finder에서 deploy-iphone.command 더블클릭 (또는 Terminal에서 ./kungkung/app/tool/deploy-iphone.command)
+```
+- 하는 일:
+  1. 게임 파일을 복사하고(`sync_web.sh`) Flutter를 설정한다.
+  2. 실제 기기용으로 서명해 빌드한다(Release).
+  3. 서명과 Bundle ID(`com.ffogtive.kungkung`)를 확인한다.
+  4. `devicectl`로 설치하고 실행한다. 기존 앱은 지우지 않고 덮어쓴다.
+- **서명 팀**은 Xcode에 로그인한 계정의 Apple Development 인증서에서 찾는다. **아이폰**은 Mac과 페어링된 기기 하나를 찾는다.
+  - 팀이나 기기가 여럿이면 `tool/deploy.local`에 `DEPLOY_TEAM=…`, `DEPLOY_DEVICE=…`를 적는다.
+  - 이 파일은 깃에 올라가지 않는다. 저장소가 공개라 ID를 저장소에 두지 않는다.
+- 로그는 `kungkung/app/.local/deploy-runs/<시각>/`에 남는다. `build.log`, `install.json`, `launch.json`, `exit-code`가 있다.
+- SSH로 실행하면 키체인 서명이 실패할 수 있다(`errSecInternalComponent`). 로그인된 Mac에서 더블클릭으로 실행한다.
+- 처음 한 번은 아래 1·4절(Xcode 계정 로그인, 아이폰 신뢰·개발자 모드)이 먼저 되어 있어야 한다.
+- 클라우드의 Claude 세션은 Mac에 닿지 못한다. 그래서 설치는 이 스크립트를 Mac에서 실행해서 한다.
+  - Mac에 GitHub self-hosted runner를 붙이는 방법도 있지만, 이 저장소는 공개라 쓰지 않는다. 공개 저장소에서 runner를 쓰면 남의 코드가 내 Mac에서 돌 수 있다.
+
 ## 1. Mac 준비 (처음 한 번)
 
 1. **Xcode**: App Store에서 최신 버전을 설치하고, 한 번 실행해 추가 구성 요소를 받는다.
@@ -92,6 +114,8 @@ dart run tool/serve.dart            # http://127.0.0.1:8790/real.html
 | `lib/local_server.dart` | 127.0.0.1 로컬 서버. GET·HEAD, Range 206·416, MIME, 경로 탈출 차단. flutter 없이 `dart:io`만 쓴다 |
 | `tool/sync_web.sh` | `../real.html`, `../real/`(v3·ostrich mp4·jpg, sfx, webp)을 `assets/web/`으로 복사한다. webm은 넣지 않는다 |
 | `tool/serve.dart` | 같은 서버를 Mac이나 컨테이너에서 띄운다. 브라우저 확인과 E2E에 쓴다 |
+| `tool/deploy-iphone.command` | Mac에서 더블클릭: 게임 파일 복사 → 기기용 서명 빌드 → 설치 → 실행 (팀·기기 자동, 로그 `.local/deploy-runs/`) |
+| `test/assets_test.dart` | real.html이 부르는 클립(mp4)·사진·소리가 앱 안에 모두 있는지 (`sync_web.sh` 뒤 `flutter test`) |
 | `test/local_server_test.dart` | 서버 단위 테스트 7개 (`flutter test`) |
 | `ios/Runner/Info.plist` | 이름 "킁킁!", 세로, 상태 표시줄 숨김, 로컬 서버 허용(`NSAllowsLocalNetworking`) |
 | `ios/Runner/AppDelegate.swift` | 오디오 세션(무음 스위치와 무관하게 효과음, 음악과 섞임) |
