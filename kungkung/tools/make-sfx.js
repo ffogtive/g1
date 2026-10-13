@@ -19,7 +19,15 @@ const PROMPTS = {
   grass:  ['A small dog biting a mouthful of grass, soft leafy rustle and teeth snap, close-up foley, no background'],
   chew:   ['A happy puppy chewing a crunchy treat for a second, small crunches and lip smacks, close-up foley, no background'],
   sneeze: ['A tiny cute puppy sneeze, one short nasal achoo, close microphone, no background'],
-  pop:    ['A soft cartoon pop bubble sound, short and cute, no background']
+  pop:    ['A soft cartoon pop bubble sound, short and cute, no background'],
+  // 타조(사바나): 콕(부리로 마른 땅 쪼기), 꿀꺽(삼키기), 쿵(발 구르기) / 회색이 앞발 콩콩
+  peck:   ['A large bird beak pecking hard dry ground once: one sharp woody knock, short, close-up foley, no bird call, no background',
+           'An ostrich pecking dry dirt with its beak, single quick hard tap and tiny dirt scatter, close microphone, no background'],
+  gulp:   ['A big bird swallowing food in one comic gulp, throat gulp sound, close microphone, no background',
+           'Cartoonish single big gulp swallow, wet throat glug, short, no background'],
+  stomp:  ['A heavy ostrich foot stomping on dry savanna dirt once, deep thud with a little dust crunch, close-up foley, no background',
+           'One big heavy foot stomp on hard dry ground, low thump and dirt crunch, short, no background'],
+  paw:    ['A puppy paw slapping down on soft grass once, light soft thump with grass rustle, close-up foley, no background']
 };
 const man = () => { try { return JSON.parse(fs.readFileSync(MAN, 'utf8')); } catch (e) { return { files: {} }; } };
 
@@ -32,7 +40,7 @@ async function gen(per, names) {
     const ps = PROMPTS[name]; if (!ps) { console.error('모르는 이름:', name); continue; }
     for (let k = 1; k <= per; k++) {
       // curl을 쓴다: 이 환경의 프록시를 따르고, 키는 명령줄이 아니라 표준입력 설정(-K -)으로만 넘긴다
-      const f = path.join(CAND, `${name}-${k}.mp3`), body = JSON.stringify({ text: ps[(k - 1) % ps.length], duration_seconds: name === 'chew' ? 1.4 : name === 'inhale' ? 1.0 : 0.8, prompt_influence: 0.65 });
+      const f = path.join(CAND, `${name}-${k}.mp3`), body = JSON.stringify({ text: ps[(k - 1) % ps.length], duration_seconds: name === 'chew' ? 1.4 : name === 'inhale' || name === 'gulp' ? 1.0 : name === 'peck' ? 0.6 : 0.8, prompt_influence: 0.65 });
       const code = execFileSync('curl', ['-sS', '-K', '-', '-X', 'POST', 'https://api.elevenlabs.io/v1/sound-generation', '-H', 'Content-Type: application/json', '-H', 'Accept: audio/mpeg', '--data-binary', body, '-o', f, '-w', '%{http_code}'],
         { input: 'header = "xi-api-key: ' + key + '"\n' }).toString().trim();
       if (code !== '200') {

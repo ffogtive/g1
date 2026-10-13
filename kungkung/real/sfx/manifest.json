@@ -7,6 +7,9 @@
   "grass": "grass.mp3",
   "chew": "chew.mp3",
   "sneeze": "sneeze.mp3",
-  "pop": "pop.mp3"
+  "pop": "pop.mp3",
+  "peck": "peck.mp3",
+  "gulp": "gulp.mp3",
+  "stomp": "stomp.mp3"
  }
 }
