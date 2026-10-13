@@ -8,13 +8,14 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
 <!--
-  킁킁! 실사 v2 — 5칸 방향 공격 + 가짜·연타·멈칫·크게·앞발
-  가설: "정면만 공격"으로 보인 건 강아지는 늘 정중앙으로 오고 영상만 밀었기 때문이다.
-        칸마다 그 방향으로 고개를 틀어 오는 클립을 고르고(왼쪽 칸은 좌우 반전), 가짜·연타·멈칫은
-        같은 클립을 거꾸로/멈춤/빠르게 재생해 만들면, 새 클립 몇 개로 그림 버전의 공격 패턴을 실사로 옮길 수 있다.
-  - 모든 클립은 같은 기준 사진에서 시작·끝 → 클립을 바꿔도 이음새가 거의 없다.
-  - 판정·공정 규칙은 그림 버전(index.html)과 같다: 흰 원은 아직 안 아픔, 빨간 것만 아프다.
-  - 테스트 옵션: ?seed=숫자 ?pat=패턴이름
+  킁킁! 실사 v3 시험 — 잔디 구도에서 칸마다 "앙"
+  가설: 타격감이 없던 건 카메라가 하늘을 올려다봐 "아래로 = 렌즈 쪽"이라 코가 화면 전체를 덮었기 때문이다.
+        잔디가 보이는 낮은 구도에서 강아지가 칸마다 고개를 숙여 잔디 위 한 점(쿠키 자리)을 입으로 "앙" 물면,
+        일러스트판처럼 딱 그 자리만 찍는 손맛과 "정확히 물려는" 긴장감이 산다.
+  - 시험 단계: 앙 클립 2개(가운데·오른쪽, 왼쪽은 반전)로 3칸. 판정·공정 규칙은 그림 버전(index.html)과 같다.
+  - 영상 전환: 숨긴 채 미리 되감아 두고(prime) 새 프레임이 준비된 뒤 위층만 0→1 (끊김 없음).
+  - 무는 순간: 히트스톱·줌 펀치·흔들림(영상과 그림 함께)·"앙!" — 물리면 쿠키가 입 속으로 사라졌다가 잇자국을 달고 퐁.
+  - 테스트 옵션: ?seed=숫자 ?pat=패턴이름 ?hs=히트스톱ms ?nocv=1(그림 숨김, 픽셀 검사용)
 -->
 <style>
   :root { --ink:#3b2a22; --pill:rgba(255,255,255,.92); --line:#e7d6c8; --accent:#ff7a59; color-scheme: light; }
@@ -48,7 +49,7 @@
 <div id="rot">📱 세로로 돌려 주세요</div>
 <div id="app">
   <div id="stage">
-    <div id="vids"><img id="v_base" class="live" src="real/base.jpg" alt=""></div>
+    <div id="vids"><img id="v_base" class="live" src="real/v3/base.jpg" alt=""></div>
     <canvas id="cv"></canvas>
     <div id="over"><div class="card" id="card"></div></div>
   </div>
@@ -61,33 +62,43 @@
   var Q = new URLSearchParams(location.search);
 
   /* ---------------- 클립 (초·영상 프레임 비율): 프레임 시트로 잰 값 ---------------- */
-  var DUR = 5.04, START = { x: 0.51, y: 0.40 };   // 모든 클립의 기준 프레임에서 코 자리
-  /** 돌진 클립: 준비 → 다가옴 → 꾹 → 물러남, land = 코가 유리에 눌리는 자리, lick = 같은 방향 날름 클립 */
-  var PRESS = {
-    c:  { file: 'press',    rev: 'press_rev',    lick: 'lick',    lickFrom: 2.0, ready: [0.7, 1.4], appr: [1.4, 2.5], hold: [2.5, 3.3], back: [3.9, DUR], land: { x: 0.50, y: 0.62 } },
-    r1: { file: 'press_r1', rev: 'press_r1_rev', lick: 'lick_r1', lickFrom: 2.4, ready: [0.6, 1.2], appr: [1.2, 2.5], hold: [2.5, 3.3], back: [3.9, DUR], land: { x: 0.85, y: 0.72 } },
-    r2: { file: 'press_r2', rev: 'press_r2_rev', lick: 'lick_r2', lickFrom: 2.2, ready: [0.3, 0.9], appr: [0.9, 1.7], hold: [1.7, 2.5], back: [3.8, DUR], land: { x: 0.96, y: 0.62 } }
+  var DUR = 5.04;
+  /** 앙 클립: appr = 고개를 숙이며 입을 벌림 → 끝 프레임이 무는 순간. bite = 입이 잔디에 닿는 점, up = 원래 자세로 돌아온 시각.
+      nose = 다가옴 진행률별 코 자리 [진행률, x, y] (코 톡 판정용) */
+  var SNAP = {
+    c:  { file: 'v3/snap_c',  rev: 'v3/snap_c_rev',  appr: [1.50, 1.72], up: 4.2, bite: { x: 0.50, y: 0.89 },
+          nose: [[0, 0.50, 0.42], [0.6, 0.50, 0.50], [0.8, 0.50, 0.64], [1, 0.50, 0.82]] },
+    r2: { file: 'v3/snap_r2', rev: 'v3/snap_r2_rev', appr: [0.95, 1.22], up: 4.2, bite: { x: 0.60, y: 0.89 },
+          nose: [[0, 0.50, 0.42], [0.37, 0.52, 0.40], [0.52, 0.62, 0.53], [0.68, 0.72, 0.62], [0.84, 0.80, 0.78], [1, 0.75, 0.86]] }
   };
-  var PAWS = { file: 'paws', tell: [0.0, 0.5], slam: [0.5, 1.6], taps: [0.67, 1.33], back: [1.6, 3.3], land: { x: 0.33, y: 0.80 } };   // 앞발로 같은 자리를 톡톡
-  var SNEEZE = { file: 'sneeze', seg: [1.2, 3.4] };   // 찡긋 → 에취 → 원래 자세
-  var TEASE = { file: 'lick', seg: [3.0, 3.8] };     // 혀 내밀고 할짝 (가짜 뒤 메롱)
-  var LANES = [0.14, 0.32, 0.5, 0.68, 0.86];          // 5칸 (화면 폭 비율)
-  var FIRST_FILES = ['sniff', 'press', 'press_rev', 'lick'];
-  var MORE_FILES = ['press_r1', 'press_r1_rev', 'lick_r1', 'press_r2', 'press_r2_rev', 'lick_r2', 'paws', 'sneeze'];
+  var NOSE0 = { x: 0.50, y: 0.42 };                       // 기준 자세의 코
+  var IDLE = 'v3/idle';                                   // 기준 자세로 가만히 숨쉬기 (앞뒤로 이어 붙인 고리)
+  var LANE_KEYS = [{ key: 'r2', mir: true }, { key: 'c', mir: false }, { key: 'r2', mir: false }];   // 시험 3칸 (왼쪽은 반전)
+  var GROUND_FY = 0.89;                                   // 입이 잔디에 닿는 높이 (프레임 비율)
+  var HOLD_AT = 0.8;                                      // 멈칫: 입을 벌린 채 쿠키 바로 위
+  var FIRST_FILES = [IDLE, 'v3/snap_c', 'v3/snap_c_rev', 'v3/snap_r2', 'v3/snap_r2_rev'];
+  var MORE_FILES = [];
 
   /* ---------------- 시드 난수 ---------------- */
   function mulberry(a) { return function () { a = (a + 0x6D2B79F5) >>> 0; var t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
   var sp = Q.get('seed'), rnd = mulberry(sp && /^\d+$/.test(sp) ? +sp : (Date.now() & 0xffffffff)), FX = Math.random;
 
   /* ---------------- 레이아웃 ---------------- */
-  var s = 1, dpr = 1, Wl = 390, Hl = 760, floorY = 590, G = null;
+  var s = 1, dpr = 1, Wl = 390, Hl = 760, floorY = 590, G = null, BUDGET = 40, laneX = [100, 195, 290];
   var VB = { x: 0, y: 0, w: 390, h: 693 };   // 영상 층 상자 (논리 px): 영상 비율 그대로 화면을 덮음
   function resize() {
     var r = stage.getBoundingClientRect(); if (r.width < 10 || r.height < 10) return;
     dpr = Math.min(2, window.devicePixelRatio || 1); s = Math.min(r.width / 390, r.height / 700);
-    Wl = r.width / s; Hl = r.height / s; floorY = Hl * 0.82;
+    Wl = r.width / s; Hl = r.height / s;
     cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
-    var k = Math.max(r.width / 720, r.height / 1280); VB.w = 720 * k / s; VB.h = 1280 * k / s; VB.x = (Wl - VB.w) / 2; VB.y = (Hl - VB.h) / 2;
+    // 영상 층: 화면을 덮되 좌우로 밀 여유가 생기게 조금 크게, 입이 닿는 높이가 화면 아래 손 닿는 곳에 오게
+    var cover = Math.max(Wl / 720, Hl / 1280), ov = Math.max(1.06, (Wl + 2 * 46) / (720 * cover));
+    VB.w = 720 * cover * ov; VB.h = 1280 * cover * ov; VB.x = (Wl - VB.w) / 2;
+    VB.y = Math.max(Hl - VB.h, Math.min(0, Hl - Math.max(66, Hl * 0.09) - VB.h * GROUND_FY));
+    floorY = VB.y + VB.h * GROUND_FY - 26;   // cookieY() = 입이 닿는 높이
+    BUDGET = (VB.w - Wl) / 2 - 2;
+    var out = Math.min(Wl * 0.78, biteX(SNAP.r2, false) + BUDGET);
+    laneX = [Wl - out, biteX(SNAP.c, false), out];   // 칸 = 강아지가 무는 자리 (바깥 칸은 영상을 밀어 맞춤)
     vids.style.left = (VB.x * s) + 'px'; vids.style.top = (VB.y * s) + 'px'; vids.style.width = (VB.w * s) + 'px'; vids.style.height = (VB.h * s) + 'px';
     if (G) G.cookie.x = clampX(G.cookie.x);
   }
@@ -112,7 +123,7 @@
     var v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; v.className = 'arm';
     v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
     v.innerHTML = '<source src="real/' + f + '.webm" type="video/webm"><source src="real/' + f + '.mp4" type="video/mp4">';
-    if (f === 'sniff') v.loop = true;
+    if (f === IDLE) v.loop = true;
     v._f = f; v._want = null; v._armed = false; v._tok = 0; v._mir = false;
     v.addEventListener('loadeddata', function () { if (v._want == null) prime(f, nextStart(f), false); else if (!v._armed) prime(f, v._want, v._mir, true); });
     vids.appendChild(v); VE[f] = v; return v;
@@ -120,13 +131,11 @@
   FIRST_FILES.forEach(makeVideo);
   setTimeout(function () { MORE_FILES.forEach(makeVideo); }, 400);   // 나머지는 뒤에서 받음
   function ok(f) { return VE[f] && VE[f].readyState >= 2; }
-  function okSet(st) { return ok(st.file) && ok(st.rev) && ok(st.lick); }
+  function okSet(st) { return ok(st.file) && ok(st.rev); }
   /** 숨긴 클립이 다음에 쓰일 시작점 (쓰고 나면 여기로 미리 되감아 둔다) */
   function nextStart(f) {
-    if (f === 'sniff') return 0;
-    for (var k in PRESS) { var p = PRESS[k]; if (p.file === f) return p.appr[0]; if (p.lick === f) return p.lickFrom; if (p.rev === f) return DUR - p.hold[0]; }
-    if (f === PAWS.file) return PAWS.tell[0];
-    if (f === SNEEZE.file) return SNEEZE.seg[0];
+    if (f === IDLE) return 0;
+    for (var k in SNAP) { var p = SNAP[k]; if (p.file === f) return p.appr[0]; if (p.rev === f) return DUR - (p.appr[1] + 0.3); }
     return 0;
   }
   /** 숨긴 채 t초로 되감아, 그 프레임이 실제로 준비되면 armed (보이는 층·페이드 중인 층은 건드리지 않음) */
@@ -204,14 +213,16 @@
       late: +late.toFixed(3), step: G && G.atk && G.atk.st ? G.atk.st.k : '' });
   }
   /** 매 프레임: 페이드 진행 + 영상이 게임 시계의 목표 시각을 따라가게 */
-  function follow(dt) {
+  function follow(dt, gdt) {
     if (fading) { fading.t += dt; var o = Math.min(1, fading.t / FADE); fading.v.style.opacity = o.toFixed(3); if (o >= 1) endFade(); }
     VSTAT.minCover = Math.min(VSTAT.minCover, vids.querySelector('.live') ? 1 : fading ? +fading.v.style.opacity : 0);
     if (!seg) return;
     if (!seg.shown) { seg.waited += dt; tryReveal(); }
-    seg.el += dt;
     if (seg.loop) return;
-    var v = VE[seg.f], q = Math.min(1, seg.el / seg.dur), exp = seg.from + (seg.to - seg.from) * q;
+    var v = VE[seg.f];
+    if (gdt === 0 && seg.shown) { if (!v.paused) v.pause(); return; }   // 히트스톱: 무는 프레임에서 영상도 정지
+    seg.el += gdt;
+    var q = Math.min(1, seg.el / seg.dur), exp = seg.from + (seg.to - seg.from) * q;
     if (seg.shown && !seg.pauseOnShow) {
       var ct = v.currentTime, e = exp - ct, fr = 1 / 24;
       if (ct >= seg.to - 0.01 || (q >= 1 && e < fr * 0.5)) { if (!v.paused) v.pause(); }
@@ -227,7 +238,7 @@
     if (q >= 1 && !seg.fired) { seg.fired = true; if (seg.then) seg.then(); }
   }
   function pauseVideo() { if (seg && !seg.shown) { seg.pauseOnShow = true; return; } seg = null; if (cur.f !== 'base') VE[cur.f].pause(); }
-  function idle() { playSeg('sniff', 0, DUR, DUR, false, null, true); }
+  function idle() { playSeg(IDLE, 0, DUR, DUR, false, null, true); }
   /** iOS(저전력 등)에서 준비가 멈춘 영상을 첫 터치에 깨움 */
   function warmAll() {
     Object.keys(VE).forEach(function (f) {
@@ -242,34 +253,44 @@
   var RULE = { HIT_R: 62, PAW_R: 52, CLOSE: 26, SAFE: 48, BOOP_Q0: 0.45, BOOP_Q0_BIG: 0.35 };
   var PAT = {
     kung:   { boop: 1, steps: [{ k: 'tell', d: 0.6 }, { k: 'lunge' }, { k: 'stamp' }, { k: 'back' }] },
-    big:    { label: '크게 킁!', boop: 1, big: 1, steps: [{ k: 'tell', d: 1.1, grow: 96 }, { k: 'lunge', d: 0.62 }, { k: 'stamp' }, { k: 'back' }] },
-    hold:   { label: '멈칫…', boop: 1, steps: [{ k: 'tell', d: 0.6 }, { k: 'hold' }, { k: 'lunge', d: 0.3 }, { k: 'stamp' }, { k: 'back' }] },
+    big:    { label: '크게 킁!', boop: 1, big: 1, steps: [{ k: 'tell', d: 1.1, grow: 96 }, { k: 'lunge', d: 0.48 }, { k: 'stamp' }, { k: 'back' }] },
+    hold:   { label: '멈칫…', boop: 1, steps: [{ k: 'tell', d: 0.6 }, { k: 'hold' }, { k: 'lunge', d: 0.16 }, { k: 'stamp' }, { k: 'back' }] },
     feint:  { label: '가짜?', boop: 1, steps: [{ k: 'tell', d: 0.6 }, { k: 'lunge', d: 0.32, zTo: 0.42, fake: 1 }, { k: 'tilt', d: 0.75 }, { k: 'tell', d: 0.45 }, { k: 'lunge' }, { k: 'stamp' }, { k: 'back' }] },
     double: { label: '두 번!', boop: 1, reps: 2, steps: [{ k: 'tell', d: 0.6 }, { k: 'lunge' }, { k: 'stamp', d: 0.22 }, { k: 'back' }] },
-    triple: { label: '세 번!', boop: 1, reps: 3, steps: [{ k: 'tell', d: 0.6 }, { k: 'lunge' }, { k: 'stamp', d: 0.22 }, { k: 'back' }] },
-    paws:   { label: '콩콩!', paws: 1, steps: [{ k: 'paws', d: 0.8 }, { k: 'slam', d: 1.1 }, { k: 'back', d: 0.9 }] }
+    triple: { label: '세 번!', boop: 1, reps: 3, steps: [{ k: 'tell', d: 0.6 }, { k: 'lunge' }, { k: 'stamp', d: 0.22 }, { k: 'back' }] }
   };
-  var SCHEDULE = [['kung', 0], ['big', 10], ['feint', 16], ['hold', 22], ['paws', 27], ['double', 32], ['triple', 42]];
+  var SCHEDULE = [['kung', 0], ['big', 10], ['feint', 16], ['hold', 22], ['double', 32], ['triple', 42]];
   var RETELL = 0.34, COMBO_BACK = 0.24;
-  var FORCE_PAT = PAT[Q.get('pat')] ? Q.get('pat') : null, SHIFT_MAX = 72;
+  var FORCE_PAT = PAT[Q.get('pat')] ? Q.get('pat') : null;
+  var HS = { kung: 0.06, big: 0.08, combo: 0.05, boop: 0.05 };   // 히트스톱(초): 무는 프레임에서 잠깐 멈춤
+  if (/^\d+$/.test(Q.get('hs') || '')) { var hs0 = +Q.get('hs') / 1000; HS = { kung: hs0, big: hs0, combo: hs0, boop: hs0 }; }   // 검사용
   function loadBest() { try { return +(localStorage.getItem(BEST_KEY) || 0); } catch (e) { return 0; } }
   function saveBest(v) { try { localStorage.setItem(BEST_KEY, String(v)); } catch (e) { /* 무시 */ } }
   function newGame(started) {
-    G = { state: started ? 'play' : 'title', t: 0, play: 0, score: 0, hearts: 3, combo: 0, best: loadBest(), dodges: 0, boops: 0, prints: [], printCount: 0,
+    G = { state: started ? 'play' : 'title', t: 0, play: 0, score: 0, hearts: 3, combo: 0, best: loadBest(), dodges: 0, boops: 0, printCount: 0,
       seen: {}, kinds: [], hitKinds: [], warnF2: 0, lanes: [],
-      cookie: { x: Wl / 2, tx: Wl / 2, wet: 0, scared: 0, run: 0, inv: 0, squash: 0 }, atk: null, nextAtk: 2.0, pops: [], fx: [], shake: 0, shot: null, endT: null,
-      shift: 0, shiftT: 0, shiftY: 0, zoom: 1, zoomWant: 1, ox: Wl / 2, oy: Hl * 0.4, jit: 0, huh: 0 };
+      cookie: { x: Wl / 2, tx: Wl / 2, scared: 0, run: 0, inv: 0, squash: 0, hidden: 0, popT: 1, flinch: 0, fdir: 1, hideAt: null },
+      atk: null, nextAtk: 2.0, pops: [], fx: [], shake: 0, shot: null, endT: null,
+      shift: 0, shiftT: 0, shiftY: 0, zoom: 1, ox: Wl / 2, oy: Hl * 0.8, jit: 0, huh: 0, freeze: 0, hsTotal: 0, hsN: 0, punchT: 9, punchAmp: 0, camX: 0, camY: 0 };
     hideOver(); idle();
   }
 
   /* ---------------- 소리·진동 ---------------- */
-  var AC = null;
-  function audio() { try { if (!AC) { AC = new (window.AudioContext || window.webkitAudioContext)(); var b = AC.createBuffer(1, 1, 22050), src = AC.createBufferSource(); src.buffer = b; src.connect(AC.destination); src.start(0); } if (AC.state !== 'running') AC.resume(); } catch (e) { AC = null; } }
+  var AC = null, unlocked = false;
+  function ensureAC() { if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; } } return AC; }
+  /** 첫 터치에 소리를 깨움 (iOS: 터치 안에서 무음 한 번 재생). 끊겼거나(interrupted) 백그라운드에서 돌아와도 다음 터치에 다시 */
+  function audio() {
+    try {
+      if (!ensureAC()) return;
+      if (!unlocked) { var b = AC.createBuffer(1, 1, 22050), src = AC.createBufferSource(); src.buffer = b; src.connect(AC.destination); src.start(0); unlocked = true; }
+      if (AC.state !== 'running') AC.resume();
+    } catch (e) { /* 무시 */ }
+  }
   ['pointerup', 'touchend', 'click'].forEach(function (t) { document.addEventListener(t, audio, { passive: true }); });
   document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   function tone(type, f0, f1, dur, vol, delay) { if (!AC) return; try { var t = AC.currentTime + (delay || 0), o = AC.createOscillator(), g = AC.createGain(); o.type = type; o.frequency.setValueAtTime(f0, t); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(AC.destination); o.start(t); o.stop(t + dur + 0.02); } catch (e) { /* 무시 */ } }
   function noise(dur, vol, freq, type, delay) { if (!AC) return; try { var n = Math.floor(AC.sampleRate * dur), b = AC.createBuffer(1, n, AC.sampleRate), d = b.getChannelData(0); for (var i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 1.5); var src = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain(); src.buffer = b; f.type = type || 'lowpass'; f.frequency.value = freq || 900; g.gain.value = vol; src.connect(f); f.connect(g); g.connect(AC.destination); src.start(AC.currentTime + (delay || 0)); } catch (e) { /* 무시 */ } }
-  var SND = {
+  var SYN = {   // 합성음 (샘플이 없을 때)
     sniff: function () { noise(0.09, 0.22, 1800, 'bandpass'); noise(0.09, 0.22, 2100, 'bandpass', 0.14); },
     inhale: function () { noise(0.7, 0.16, 1200, 'bandpass'); tone('sine', 300, 700, 0.8, 0.06); },
     whoosh: function () { noise(0.25, 0.18, 900, 'lowpass'); },
@@ -282,8 +303,33 @@
     boop: function () { tone('sine', 700, 1500, 0.08, 0.3); noise(0.3, 0.3, 3000, 'highpass', 0.12); },
     huh: function () { tone('sine', 400, 620, 0.18, 0.12); },
     tease: function () { tone('triangle', 700, 500, 0.1, 0.12); tone('triangle', 820, 600, 0.12, 0.12, 0.12); },
+    chomp: function () { tone('square', 260, 90, 0.07, 0.2); noise(0.05, 0.35, 2600, 'bandpass'); },   // 앙 (이빨 딱)
+    grass: function () { tone('square', 240, 100, 0.06, 0.16); noise(0.14, 0.25, 1200, 'bandpass'); },   // 앙? (잔디만 물음)
+    crunch: function () { noise(0.12, 0.35, 1800, 'bandpass', 0.03); noise(0.08, 0.28, 3400, 'highpass', 0.1); },   // 와삭
+    pop: function () { tone('sine', 480, 920, 0.12, 0.2); },
     over: function () { [523, 440, 349].forEach(function (f, i) { tone('triangle', f, 0, 0.25, 0.16, i * 0.15); }); }
   };
+  /* 효과음 샘플: real/sfx/manifest.json에 있는 것만 받아 쓰고(ElevenLabs로 만든 것), 없거나 실패하면 합성음 */
+  var SFX = {}, SFXN = { want: 0, loaded: 0, failed: 0 }, ALIAS = { boop: 'sneeze' };
+  function loadSfx() {
+    if (!ensureAC() || !window.fetch) return;
+    fetch('real/sfx/manifest.json').then(function (r) { return r.ok ? r.json() : { files: {} }; }).then(function (m) {
+      Object.keys(m.files || {}).forEach(function (name) {
+        SFXN.want++;
+        fetch('real/sfx/' + m.files[name]).then(function (r) { if (!r.ok) throw new Error('sfx'); return r.arrayBuffer(); })
+          .then(function (ab) { return new Promise(function (res, rej) { var pr = AC.decodeAudioData(ab, res, rej); if (pr && pr.then) pr.then(res, rej); }); })
+          .then(function (buf) { SFX[name] = buf; SFXN.loaded++; })
+          .catch(function () { SFXN.failed++; });
+      });
+    }).catch(function () { /* 무시: 합성음 */ });
+  }
+  function playSfx(name, vol) {
+    var b = SFX[ALIAS[name] || name]; if (!AC || !b) return false;
+    try { var src = AC.createBufferSource(), g = AC.createGain(); src.buffer = b; g.gain.value = vol || 0.9; src.connect(g); g.connect(AC.destination); src.start(); return true; } catch (e) { return false; }
+  }
+  var SND = {};
+  Object.keys(SYN).forEach(function (k) { SND[k] = function (x) { if (!playSfx(k)) SYN[k](x); }; });
+  loadSfx();
   function buzz(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* 무시 */ } }
 
   /* ---------------- 입력 ---------------- */
@@ -302,32 +348,18 @@
   cv.addEventListener('pointerup', endP); cv.addEventListener('pointercancel', endP);
 
   /* ---------------- 칸 → 클립 ---------------- */
-  function laneOf(x) { var best = 0; LANES.forEach(function (f, i) { if (Math.abs(f * Wl - x) < Math.abs(LANES[best] * Wl - x)) best = i; }); return best; }
-  /** 칸에 맞는 돌진 클립 (왼쪽 칸은 반전). 바깥 칸은 r1·r2 중 시드로, 안 받아졌으면 가운데 클립을 밀어 씀 */
-  function laneSet(l, roll) {
-    if (l === 2) return { key: 'c', set: PRESS.c, mir: false };
-    var near = l === 1 || l === 3, key;
-    if (near) key = 'c';   // 안쪽 칸: 가운데 클립을 옆으로 밀어 씀 (바깥 클립을 많이 밀면 과하게 확대돼 어색)
-    else key = roll < 0.5 && okSet(PRESS.r2) ? 'r2' : okSet(PRESS.r1) ? 'r1' : okSet(PRESS.r2) ? 'r2' : 'c';
-    return { key: key, set: PRESS[key], mir: key !== 'c' && l < 2 };
-  }
-  /** 돌진 클립을 정하고, 코가 눌리는 자리가 목표 x에 오도록 밀 양을 계산 (확대 반영, 최대 ±SHIFT_MAX) */
+  function laneOf(x) { var best = 0; for (var i = 1; i < laneX.length; i++) if (Math.abs(laneX[i] - x) < Math.abs(laneX[best] - x)) best = i; return best; }
+  function laneSet(l) { var L = LANE_KEYS[l]; return { key: L.key, set: SNAP[L.key], mir: L.mir }; }
+  /** 클립의 무는 점이 (밀기 전) 화면 어디인지 */
+  function biteX(set, mir) { return VB.x + VB.w * (mir ? 1 - set.bite.x : set.bite.x); }
+  function clampB(v) { return Math.max(-BUDGET, Math.min(BUDGET, v)); }
+  /** 앙 클립을 정하고, 무는 자리가 x(칸 중심)에 오도록 영상 층을 밀 양 */
   function aimLane(a, x) {
-    var L = laneSet(laneOf(x), a.laneRoll); a.lane = laneOf(x); a.key = L.key; a.set = L.set; a.mir = L.mir;
-    var p = framePt(a.set.land.x, a.set.land.y, a.mir);
-    setOriginY(p.y); a.shiftT = solveShift(p.x, x, 1 + (a.P.big ? 0.22 : 0.08)); G.lanes.push(a.lane + ':' + a.key + (a.mir ? 'm' : ''));
+    var l = laneOf(x), L = laneSet(l); a.lane = l; a.key = L.key; a.set = L.set; a.mir = L.mir;
+    a.shiftT = clampB(x - biteX(L.set, L.mir)); G.lanes.push(a.lane + ':' + a.key + (a.mir ? 'm' : ''));
   }
-  /** 예고 중: 지금 노리는 칸의 돌진 클립을 숨긴 채 다가옴 시작점에 준비 (같으면 아무 일 없음) */
-  function primeLane(a, x) { var L = laneSet(laneOf(x), a.laneRoll); prime(L.set.file, L.set.appr[0], L.mir); }
-  function setOriginY(y) { G.shiftY += (G.oy - y) * (1 - G.zoom); G.oy = y; }   // 세로 기준점을 옮겨도 튀지 않게 (shiftY는 천천히 0으로)
-  function coverZ(sh) {   // 이만큼 밀었을 때 영상 가장자리가 안 보이려면 필요한 확대 (가로 기준점 = 화면 가운데)
-    return Math.max(1, (G.ox + sh + 4) / Math.max(1, G.ox - VB.x), (Wl - G.ox - sh + 4) / Math.max(1, VB.x + VB.w - G.ox));
-  }
-  function solveShift(px, X, want) {
-    var sh = X - px;
-    for (var i = 0; i < 4; i++) { var Z = Math.max(want, coverZ(sh)); sh = Math.max(-SHIFT_MAX, Math.min(SHIFT_MAX, X - G.ox - (px - G.ox) * Z)); }
-    return sh;
-  }
+  /** 예고 중: 지금 노리는 칸의 앙 클립을 숨긴 채 다가옴 시작점에 준비 (같으면 아무 일 없음) */
+  function primeLane(a, x) { var L = laneSet(laneOf(x)); prime(L.set.file, L.set.appr[0], L.mir); }
 
   /* ---------------- 공격 (그림 버전 index.html의 실행기를 영상에 연결) ---------------- */
   function interval() { return Math.max(0.8, 1.7 - G.play * 0.022); }
@@ -335,8 +367,8 @@
   function ease(q) { return q * q * (3 - 2 * q); }
   function pickKind() {
     var r = rnd();
-    if (FORCE_PAT) return FORCE_PAT === 'paws' && !ok(PAWS.file) ? 'kung' : FORCE_PAT;
-    var avail = SCHEDULE.filter(function (e) { return G.play >= e[1] && (e[0] !== 'paws' || ok(PAWS.file)); }).map(function (e) { return e[0]; }), i;
+    if (FORCE_PAT) return FORCE_PAT;
+    var avail = SCHEDULE.filter(function (e) { return G.play >= e[1]; }).map(function (e) { return e[0]; }), i;
     for (i = 1; i < avail.length; i++) if (!G.seen[avail[i]]) return avail[i];   // 새로 풀린 패턴은 처음 한 번 꼭
     var sum = avail.length + 1, acc = 0;
     for (i = 0; i < avail.length; i++) { acc += (i === 0 ? 2 : 1) / sum; if (r < acc) return avail[i]; }
@@ -347,11 +379,14 @@
     var a = { kind: kind, P: P, i: -1, st: null, t: 0, dur: 0, tx: C.x, lockX: null, locked: false, r: RULE.HIT_R, fake: false, rep: 1, caught: false, retell: false, first: !G.seen[kind], slams: null, held: false };
     a.laneRoll = rnd(); a.holdD = 0.5 + rnd() * 0.4; a.nextIv = interval() * (0.75 + rnd() * 0.5);   // 시드 굴림: 항상 같은 횟수
     G.seen[kind] = true; G.kinds.push({ kind: kind, t: +G.play.toFixed(2), first: a.first });
-    G.atk = a;
+    a.ringX = laneX[laneOf(C.x)]; G.atk = a;
     if (a.first && P.label) pop(P.label, Wl / 2, Hl * 0.12, 32, '#ffd23f');
     nextStep(a);
   }
-  function endAttack() { var a = G.atk; G.atk = null; G.nextAtk = a ? a.nextIv : 1.5; G.shiftT = 0; idle(); }
+  function endAttack() {
+    var a = G.atk, C = G.cookie; G.atk = null; G.nextAtk = a ? a.nextIv : 1.5; G.shiftT = 0; idle();
+    if (C.hidden && G.hearts > 0) { C.hidden = 0; C.popT = 0; SND.pop(); }   // 고개를 들면 쿠키가 잇자국을 달고 퐁
+  }
   function nextStep(a) {
     a.i++;
     if (a.i >= a.P.steps.length) {
@@ -369,7 +404,8 @@
     else if ((st.k === 'tell' || st.k === 'paws') && a.first && a.i === 0) d *= 1.5;
     return d;
   }
-  function lock(a) { if (a.locked) return; a.lockX = a.tx; a.locked = true; ensureSafe(a, hitsOf(a)); }
+  function lock(a) { if (a.locked) return; a.lockX = laneX[laneOf(a.tx)]; a.locked = true; ensureSafe(a, hitsOf(a)); }   // 잠그면 칸 중심
+  function stampLen(a) { for (var j = Math.max(0, a.i); j < a.P.steps.length; j++) if (a.P.steps[j].k === 'stamp') return a.P.steps[j].d || 0.3; return 0.3; }
   function apprAt(set, frac) { return set.appr[0] + (set.appr[1] - set.appr[0]) * frac; }
   function enterStep(a) {
     var st = a.st, C = G.cookie;
@@ -383,39 +419,28 @@
       primeLane(a, a.locked ? a.lockX : a.tx);
     } else if (st.k === 'lunge') {
       a.fake = !!st.fake; if (!a.fake) lock(a);
-      var x = a.locked ? a.lockX : a.tx;
+      var x = a.locked ? a.lockX : laneX[laneOf(a.tx)];
       if (!a.held) aimLane(a, x);
       a.shift0 = G.shift; a.frac = st.zTo || 1;
-      var from = a.held ? apprAt(a.set, 0.25) : a.set.appr[0];
+      var from = a.held ? apprAt(a.set, HOLD_AT) : a.set.appr[0];
       playSeg(a.set.file, from, apprAt(a.set, a.frac), a.dur, a.mir, null); SND.whoosh();
-      // 다음에 쓸 수 있는 클립을 숨긴 채 미리: 잡힘(날름), 가짜(거꾸로), 연타(거꾸로 물러남)
-      prime(a.set.lick, a.set.lickFrom, a.mir);
-      if (a.fake) prime(a.set.rev, DUR - apprAt(a.set, a.frac), a.mir);
-      else if (a.P.reps) prime(a.set.rev, DUR - a.set.hold[0], a.mir);
+      // 다음에 쓸 거꾸로 재생본을 숨긴 채 미리: 가짜(반쯤에서 되돌아감) / 피함·연타(문 자리에서 고개 듦)
+      prime(a.set.rev, a.fake ? DUR - apprAt(a.set, a.frac) : DUR - (a.set.appr[1] + stampLen(a)), a.mir);
     } else if (st.k === 'hold') {
       lock(a); aimLane(a, a.lockX); a.held = true; a.shift0 = G.shift;
-      var set = a.set; playSeg(set.file, set.appr[0], apprAt(set, 0.25), 0.18, a.mir, pauseVideo);   // 조금 다가오다 멈칫
-    } else if (st.k === 'tilt') {   // 가짜: 오던 길을 거꾸로 → 혀 내밀고 메롱
+      var set = a.set; playSeg(set.file, set.appr[0], apprAt(set, HOLD_AT), 0.22, a.mir, pauseVideo);   // 입을 벌린 채 쿠키 바로 위에서 멈칫
+    } else if (st.k === 'tilt') {   // 가짜: 반쯤 내려오다 거꾸로 → 메롱
       var tf = apprAt(a.set, a.frac), set2 = a.set, mir = a.mir;
-      prime(TEASE.file, TEASE.seg[0], false);
-      playSeg(set2.rev, DUR - tf, DUR - set2.appr[0], 0.25, mir, function () { playSeg(TEASE.file, TEASE.seg[0], TEASE.seg[1], 0.45, false, null); });
+      prime(IDLE, 0, false);
+      playSeg(set2.rev, DUR - tf, DUR - set2.appr[0], 0.25, mir, function () { idle(); });
       G.shiftT = 0; pop('메롱', Wl * 0.7, Hl * 0.22, 30, '#ff9ec0'); SND.tease();
-    } else if (st.k === 'stamp') {
-      playSeg(a.set.file, a.set.hold[0], a.set.hold[1], a.caught ? 0.45 : Math.max(0.3, a.dur), a.mir, null);   // 유리에 꾹 눌린 채 킁킁
+    } else if (st.k === 'stamp') {   // 앙: 문 채 잠깐 (물렸으면 조금 더)
+      a.stampEnd = a.set.appr[1] + a.dur;
+      playSeg(a.set.file, a.set.appr[1], a.stampEnd, a.dur, a.mir, null);
     } else if (st.k === 'back') {
-      if (a.paws) { a.dur = 0.9; playSeg(PAWS.file, PAWS.back[0], PAWS.back[1], a.dur, a.mir, null); G.shiftT = 0; }
-      else if (a.caught) { a.dur = 2.0; playSeg(a.set.lick, a.set.lickFrom, DUR, a.dur, a.mir, null); setTimeout(function () { if (G && !G.shot) snapShot(); }, 300); }   // 같은 방향으로 날름
-      else if (a.P.reps && a.rep < a.P.reps && G.endT == null) { a.dur = COMBO_BACK; var set3 = a.set, r0 = DUR - set3.hold[0]; playSeg(set3.rev, r0, Math.min(DUR - set3.appr[0], r0 + 3.6 * a.dur), a.dur, a.mir, null); }   // 연타: 거꾸로 빠르게 물러남 (4배속 안에서)
-      else { a.dur = 0.9; playSeg(a.set.file, a.set.hold[1], a.set.back[1], a.dur, a.mir, null); G.shiftT = 0; }   // 꾹 끝에서 이어서 물러남 (되감기 없음)
-    } else if (st.k === 'paws') {   // 앞발: 쿠키 쪽 앞발을 들어 같은 자리를 톡톡 (오른쪽이면 반전)
-      a.paws = true; a.mir = C.x > Wl / 2; a.r = RULE.PAW_R; a.locked = true;
-      var T = Math.max(70, Math.min(Wl - 70, C.x)), pp = framePt(PAWS.land.x, PAWS.land.y, a.mir);
-      setOriginY(pp.y); a.shift0 = G.shift; a.shiftT = solveShift(pp.x, T, 1); a.lockX = T;
-      a.slams = PAWS.taps.map(function (tt) { return { x: T, at: tt - PAWS.slam[0], done: false }; });
-      ensureSafe(a, hitsOf(a));
-      playSeg(PAWS.file, PAWS.tell[0], PAWS.tell[1], a.dur, a.mir, null);
-    } else if (st.k === 'slam') {
-      playSeg(PAWS.file, PAWS.slam[0], PAWS.slam[1], a.dur, a.mir, null);
+      if (a.caught) { a.dur = 1.6; playSeg(a.set.file, a.stampEnd, a.set.up, a.dur, a.mir, null); }   // 물림: 잔디째 냠냠 → 고개 듦
+      else if (a.P.reps && a.rep < a.P.reps && G.endT == null) { a.dur = COMBO_BACK; playSeg(a.set.rev, DUR - a.stampEnd, DUR - a.set.appr[0], a.dur, a.mir, null); }   // 연타: 거꾸로 빠르게 고개 듦
+      else { a.dur = 0.45; playSeg(a.set.rev, DUR - a.stampEnd, DUR - a.set.appr[0], a.dur, a.mir, null); G.shiftT = 0; }   // 피함: 문 자리에서 그대로 고개 듦
     }
   }
   function updateAttack(dt) {
@@ -424,25 +449,23 @@
     a.t += dt;
     var k = a.st.k, q = Math.min(1, a.t / a.dur);
     if (k === 'tell') {
-      if (!a.locked) { a.tx += (C.x - a.tx) * Math.min(1, dt * 7); G.shiftT = (a.tx - Wl / 2) * 0.12; primeLane(a, a.tx); }
+      if (!a.locked) {   // 흰 원은 노리는 칸으로 미끄러지고, 강아지(영상)도 그쪽으로 조금 기운다
+        a.tx += (C.x - a.tx) * Math.min(1, dt * 7);
+        var pl = laneOf(a.tx), PL = laneSet(pl); a.ringX += (laneX[pl] - a.ringX) * Math.min(1, dt * 12);
+        G.shiftT = 0.35 * clampB(laneX[pl] - biteX(PL.set, PL.mir)); primeLane(a, a.tx);
+      }
       if (a.st.grow) a.r = RULE.HIT_R + (a.st.grow - RULE.HIT_R) * Math.min(1, q * 1.4);
-      G.zoomWant = 1;
     } else if (k === 'lunge') {
-      if (a.fake) a.tx += (C.x - a.tx) * Math.min(1, dt * 3);
-      var e = ease(q) * a.frac;
-      G.shift = a.shift0 + (a.shiftT - a.shift0) * Math.min(1, e / a.frac); G.shiftT = G.shift;   // 영상을 밀어 코가 목표 위로
-      G.zoomWant = 1 + (a.P.big ? 0.22 : 0.08) * e;
+      if (a.fake) { a.tx += (C.x - a.tx) * Math.min(1, dt * 3); a.ringX += (laneX[laneOf(a.tx)] - a.ringX) * Math.min(1, dt * 12); }
+      G.shift = a.shift0 + (a.shiftT - a.shift0) * ease(q); G.shiftT = G.shift;   // 영상을 밀어 무는 자리가 칸 위로
       if (q >= 1) { if (a.fake) { nextStep(a); return; } impactNose(a); return; }
     } else if (k === 'hold') {
-      var dx = C.x - a.lockX; a.lockX += Math.max(-50 * dt, Math.min(50 * dt, dx));   // 빨간 원이 슬금슬금
-      a.shiftT += Math.max(-50 * dt, Math.min(50 * dt, dx)); G.jit = 2.5;
+      var dx = C.x - a.lockX, lc = laneX[a.lane];   // 빨간 원이 슬금슬금 (칸 중심 ±36px까지, 영상도 같이)
+      a.lockX = Math.max(lc - 36, Math.min(lc + 36, a.lockX + Math.max(-50 * dt, Math.min(50 * dt, dx))));
+      a.shiftT = clampB(a.lockX - biteX(a.set, a.mir)); G.jit = 2.5;
       G.shift += (a.shiftT - G.shift) * Math.min(1, dt * 10); G.shiftT = G.shift;
     } else if (k === 'tilt') {
       a.tx += (C.x - a.tx) * Math.min(1, dt * 7);
-    } else if (k === 'paws') {
-      G.shift = a.shift0 + (a.shiftT - a.shift0) * ease(q); G.shiftT = G.shift;
-    } else if (k === 'slam') {
-      a.slams.forEach(function (sl) { if (!sl.done && a.t >= sl.at) { sl.done = true; impactPaw(a, sl); } });
     } else if (k === 'boop') {   // 재채기가 끝나면 이 공격은 끝 (남은 연타도 취소)
       if (a.t >= a.dur) endAttack();
       return;
@@ -464,47 +487,55 @@
     return Math.max(best, hi - c);
   }
   function ensureSafe(a, ints) { var f = freeLen(ints); if (f < RULE.SAFE) { G.warnF2++; console.warn('F2 안전 구간 부족', a.kind, Math.round(f)); a.r = Math.max(30, a.r - (RULE.SAFE - f)); } }
+  function noseAt(set, p) {   // 다가옴 진행률 p에서 코 자리 (프레임 비율)
+    var N = set.nose, i = 1; while (i < N.length - 1 && N[i][0] < p) i++;
+    var A = N[i - 1], B = N[i], u = Math.max(0, Math.min(1, (p - A[0]) / Math.max(1e-6, B[0] - A[0])));
+    return { x: A[1] + (B[1] - A[1]) * u, y: A[2] + (B[2] - A[2]) * u };
+  }
   function nosePose() {
     var a = G.atk;
     if (a && a.set && (a.st.k === 'lunge' || a.st.k === 'stamp' || a.st.k === 'hold')) {
-      var e = a.st.k === 'lunge' ? ease(Math.min(1, a.t / a.dur)) * a.frac : a.st.k === 'hold' ? 0.25 : 1;
-      var fx = START.x + (a.set.land.x - START.x) * e, fy = START.y + (a.set.land.y - START.y) * e, p = frameToScreen(fx, fy, a.mir);
-      return { x: p.x, y: p.y, r: 38 + 170 * e, q: e };
+      var q = Math.min(1, a.t / a.dur), p = a.st.k === 'lunge' ? (a.held ? HOLD_AT + (1 - HOLD_AT) * q : q * a.frac) : a.st.k === 'hold' ? HOLD_AT : 1;
+      var n = noseAt(a.set, p), sp = frameToScreen(n.x, n.y, a.mir);
+      return { x: sp.x, y: sp.y, r: 28 + 26 * p, q: p };
     }
-    var p0 = frameToScreen(START.x, START.y, false); return { x: p0.x, y: p0.y, r: 38, q: 0 };
+    var p0 = frameToScreen(NOSE0.x, NOSE0.y, false); return { x: p0.x, y: p0.y, r: 28, q: 0 };
   }
   function tryBoop(p) {
     var a = G.atk; if (!a || !a.st || a.st.k !== 'lunge' || a.fake || !a.P.boop || G.endT != null) return false;
     var n = nosePose(), q0 = a.P.big ? RULE.BOOP_Q0_BIG : RULE.BOOP_Q0;
-    if (n.q < q0 || Math.hypot(p.x - n.x, p.y - n.y) > n.r * 1.3) return false;
+    if (n.q < q0 || n.q > 0.92 || p.y > cookieY() - 36 || Math.hypot(p.x - n.x, p.y - n.y) > Math.max(40, n.r * 1.3)) return false;   // 닿기 직전·쿠키 근처는 끌기 우선
     var pts = a.P.big ? 50 : 30;
     a.st = { k: 'boop' }; a.t = 0; a.locked = false; a.dur = 1.3; a.rep = 99; G.shiftT = 0;
-    G.boops++; G.combo++; G.score += pts;
+    G.boops++; G.combo++; G.score += pts; G.freeze = HS.boop; G.hsN++; G.hsTotal += HS.boop;
     pop('에취!', n.x, Math.max(80, n.y - n.r - 10), 34, '#ffffff'); pop('+' + pts, n.x + 50, n.y, 22, '#ffd23f'); SND.boop(); buzz([15, 30, 15]); G.shake = 6;
     for (var i = 0; i < 14; i++) G.fx.push({ x: n.x + (FX() - 0.5) * n.r, y: n.y, vx: (FX() - 0.5) * 260, vy: 60 + FX() * 160, t: 0, life: 0.7, r: 4 + FX() * 6 });
-    if (ok(SNEEZE.file)) playSeg(SNEEZE.file, SNEEZE.seg[0], SNEEZE.seg[1], a.dur, false, null);
-    else playSeg(a.set.file, a.set.back[0], a.set.back[1], a.dur, a.mir, null);
+    var ct = cur.f === a.set.file ? VE[cur.f].currentTime : a.set.appr[0];   // 재채기 클립이 생기기 전: 그 자리에서 거꾸로 고개 듦
+    playSeg(a.set.rev, DUR - ct, DUR - a.set.appr[0], 0.5, a.mir, null);
     return true;
   }
-  /** 쿵: 코가 유리에 꾹. 빨간 원 안이면 날름, 밖이면 피함 */
+  /** 앙: 입이 잔디(쿠키 자리)에 닿는 순간. 빨간 원 안이면 물림, 밖이면 피함 */
   function impactNose(a) {
-    var C = G.cookie, dist = Math.abs(C.x - a.lockX), hit = dist < a.r && C.inv <= 0, n = nosePose();
+    var C = G.cookie, dist = Math.abs(C.x - a.lockX), hit = dist < a.r && C.inv <= 0, gy = cookieY();
+    if (hit && !G.shot) snapShot();   // 한 컷: 입이 쿠키에 닿은 그 프레임 (쿠키를 숨기기 전)
     for (var j = a.i; j < a.P.steps.length; j++) if (a.P.steps[j].k === 'stamp') { a.i = j; break; }
     a.st = a.P.steps[a.i]; a.caught = hit; a.t = 0; a.dur = stepDur(a); enterStep(a);
-    G.prints.push({ x: n.x, y: n.y, r: 70, t: 0, life: 5 }); G.printCount++;
-    G.shake = 9; SND.bonk(); buzz(30);
-    if (hit) { caught(C, '날름!'); C.wet = 2.2; SND.lick(); }
-    else dodged(C, dist, a.r);
+    G.printCount++;
+    var hs = a.P.big ? HS.big : a.P.reps ? HS.combo : HS.kung; G.freeze = hs; G.hsN++; G.hsTotal += hs;   // 히트스톱
+    G.ox = a.lockX; G.oy = gy; G.punchT = 0; G.punchAmp = a.P.big ? 0.05 : 0.03;   // 무는 자리를 기준으로 줌 펀치
+    G.shake = a.P.big ? 12 : 8; if (hit) SND.chomp(); else SND.grass(); buzz(hit ? [40, 30, 60] : 25);
+    for (var i = 0; i < 12; i++) G.fx.push({ x: a.lockX + (FX() - 0.5) * 70, y: gy + 8, vx: (FX() - 0.5) * 240, vy: -90 - FX() * 170, t: 0, life: 0.6, r: 2 + FX() * 3, c: 'blade' });
+    if (hit) {
+      caught(C, '앙!', a.lockX < Wl / 2 ? 1 : -1); C.hidden = 1; C.hideAt = G.play; SND.crunch();
+      for (var k = 0; k < 10; k++) G.fx.push({ x: C.x + (FX() - 0.5) * 50, y: gy - 6, vx: (FX() - 0.5) * 200, vy: -60 - FX() * 140, t: 0, life: 0.7, r: 2 + FX() * 3.5, c: 'crumb' });
+    } else {
+      dodged(C, dist, a.r); pop('앙?', a.lockX + (a.lockX < Wl / 2 ? 80 : -80), gy - 130, 30, '#ffffff');
+      if (dist < a.r + 70) { C.flinch = 1; C.fdir = C.x >= a.lockX ? 1 : -1; }   // 아슬하게 빗나가면 움찔
+    }
   }
-  function impactPaw(a, sl) {
-    var C = G.cookie, dist = Math.abs(C.x - sl.x), hit = dist < a.r && C.inv <= 0;
-    G.shake = 7; SND.paw(); buzz(20);
-    if (hit) { a.caught = true; a.slams.forEach(function (o) { o.done = true; }); caught(C, '꾹!'); C.squash = 1; SND.squish(); }
-    else dodged(C, dist, a.r);
-  }
-  function caught(C, word) {
+  function caught(C, word, side) {
     G.hearts--; G.combo = 0; C.inv = 0.9; if (G.atk) G.hitKinds.push(G.atk.kind + '@' + G.play.toFixed(1));
-    pop(word, C.x, cookieY() - 80, 40, '#ff7aa2'); buzz([40, 30, 60]);
+    pop(word, C.x + (side || 0) * 92, cookieY() - 120, 48, '#ff7aa2');   // 얼굴을 가리지 않게 옆 위로
     if (G.hearts <= 0) G.endT = 2.0;
   }
   function dodged(C, dist, r) {
@@ -525,7 +556,7 @@
       if (cur.mir) { x3.translate((VB.x * 2 + VB.w) * px, 0); x3.scale(-1, 1); }
       x3.drawImage(v, VB.x * px, VB.y * px, VB.w * px, VB.h * px); x3.restore();
       x3.drawImage(cv, 0, 0, W, H);
-      var c2 = document.createElement('canvas'), w = 300, h = 420, sh = Math.min(H, W * 1.4), sy = Math.max(0, Math.min(H - sh, H * 0.55 - sh / 2)); c2.width = w; c2.height = h;
+      var c2 = document.createElement('canvas'), w = 300, h = 420, sh = Math.min(H, W * 1.4), sy = Math.max(0, Math.min(H - sh, H * 0.7 - sh / 2)); c2.width = w; c2.height = h;
       c2.getContext('2d').drawImage(c3, 0, sy, W, sh, 0, 0, w, h);
       G.shot = c2.toDataURL('image/jpeg', 0.8);
     } catch (e) { G.shot = null; }
@@ -533,44 +564,37 @@
 
   /* ---------------- 진행 ---------------- */
   function update(dt) {
-    G.t += dt; var C = G.cookie, a = G.atk;
-    G.shake *= Math.exp(-dt * 10); G.huh = Math.max(0, G.huh - dt); G.jit = Math.max(0, G.jit - dt * 10);
+    G.t += dt; var C = G.cookie, a = G.atk, gdt = dt;
+    if (G.freeze > 0) { G.freeze -= dt; gdt = 0; }   // 히트스톱: 게임 시계와 영상만 멈춤 (쿠키 끌기는 계속)
+    G.shake *= Math.exp(-dt * 10); G.huh = Math.max(0, G.huh - dt); G.jit = Math.max(0, G.jit - dt * 10); G.punchT += dt;
     var ox = C.x; C.x += (C.tx - C.x) * Math.min(1, dt * 18); C.run = (C.x - ox) / Math.max(dt, 0.001);
-    C.wet = Math.max(0, C.wet - dt); C.inv = Math.max(0, C.inv - dt); C.squash = Math.max(0, C.squash - dt * 2.5);
+    C.inv = Math.max(0, C.inv - dt); C.squash = Math.max(0, C.squash - dt * 2.5); C.flinch = Math.max(0, C.flinch - dt * 3); C.popT = Math.min(1, C.popT + dt / 0.35);
     C.scared = 0;
     if (a && a.st) {
       var k = a.st.k;
       if (k === 'tell' || k === 'lunge' || k === 'hold' || k === 'tilt') { if (Math.abs(C.x - (a.locked ? a.lockX : a.tx)) < a.r + 20) C.scared = 1; }
-      else if ((k === 'paws' || k === 'slam') && a.slams && a.slams.some(function (sl) { return !sl.done && Math.abs(C.x - sl.x) < a.r + 20; })) C.scared = 1;
     }
-    G.prints = G.prints.filter(function (p) { p.t += dt; return p.t < p.life; });
     G.fx = G.fx.filter(function (p) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 120 * dt; return p.t < p.life; });
     G.pops = G.pops.filter(function (p) { p.t += dt; return p.t < p.life; });
-    follow(dt);
+    follow(dt, gdt);
     if (G.state === 'play') {
-      G.play += dt; updateAttack(dt);
+      G.play += gdt; updateAttack(gdt);
       if (G.endT != null) { G.endT -= dt; if (G.endT <= 0) gameOver(); }
     } else if (G.state === 'title') { C.tx = Wl / 2 + Math.sin(G.t * 1.3) * Wl * 0.25; G.shiftT = (C.x - Wl / 2) * 0.06; }
     a = G.atk;
-    var driven = a && a.st && (a.st.k === 'lunge' || a.st.k === 'hold' || a.st.k === 'paws');
+    var driven = a && a.st && (a.st.k === 'lunge' || a.st.k === 'hold');
     if (!driven) G.shift += (G.shiftT - G.shift) * Math.min(1, dt * 4);
-    if (!a || a.st.k === 'tell' || a.st.k === 'tilt' || a.st.k === 'boop' || (a.st.k === 'back' && !a.caught)) G.zoomWant += (1 - G.zoomWant) * Math.min(1, dt * 5);
-    // 영상을 민 만큼 확대해 가장자리가 화면에 드러나지 않게 (확대 기준점 = 코가 눌리는 자리)
-    G.shiftY += (0 - G.shiftY) * Math.min(1, dt * 3);
-    G.ox = Wl / 2;
-    var zl = (G.ox + G.shift + 4) / Math.max(1, G.ox - VB.x), zr = (Wl - G.ox - G.shift + 4) / Math.max(1, VB.x + VB.w - G.ox);
-    var zt = (G.oy + G.shiftY + 4) / Math.max(1, G.oy - VB.y), zb = (Hl - G.oy - G.shiftY + 4) / Math.max(1, VB.y + VB.h - G.oy);
-    G.zoom = Math.max(1, G.zoomWant, zl, zr, zt, zb);
-    if (!a && G.zoom < 1.001) G.oy = Hl * 0.4;   // 쉬는 동안 세로 기준점을 제자리로
-    var shx = (FX() - 0.5) * (G.shake * 2 + G.jit), shy = (FX() - 0.5) * (G.shake * 2 + G.jit);
+    // 확대는 무는 순간의 펀치만 (40ms 올리고 160ms 내림). 흔들림·펀치는 영상과 그림에 똑같이
+    var pt = G.punchT; G.zoom = 1 + (pt < 0.04 ? pt / 0.04 : pt < 0.2 ? 1 - (pt - 0.04) / 0.16 : 0) * G.punchAmp;
+    var shx = (FX() - 0.5) * (G.shake * 2 + G.jit), shy = (FX() - 0.5) * (G.shake * 2 + G.jit); G.camX = shx; G.camY = shy;
     vids.style.transformOrigin = ((G.ox - VB.x) * s).toFixed(1) + 'px ' + ((G.oy - VB.y) * s).toFixed(1) + 'px';
     vids.style.transform = 'translate(' + ((G.shift + shx) * s).toFixed(1) + 'px,' + ((G.shiftY + shy) * s).toFixed(1) + 'px) scale(' + G.zoom.toFixed(3) + ')';
   }
   function gameOver() {
     G.state = 'over'; G.endT = null; SND.over();
     var isBest = G.score > G.best; if (isBest) { G.best = G.score; saveBest(G.score); }
-    document.getElementById('card').innerHTML = '<h2>날름당했어요!</h2>' + (G.shot ? '<img class="shot" alt="날름당한 순간" src="' + G.shot + '">' : '') +
-      '<div class="big">' + G.score + '</div><div class="sub">' + (isBest ? '최고 기록!' : '최고 ' + G.best) + '<br>피함 ' + G.dodges + ' · 코 톡 ' + G.boops + ' · 코 도장 ' + G.printCount + '개</div>' +
+    document.getElementById('card').innerHTML = '<h2>다 먹혔어요!</h2>' + (G.shot ? '<img class="shot" alt="앙 물린 순간" src="' + G.shot + '">' : '') +
+      '<div class="big">' + G.score + '</div><div class="sub">' + (isBest ? '최고 기록!' : '최고 ' + G.best) + '<br>피함 ' + G.dodges + ' · 코 톡 ' + G.boops + ' · 앙 ' + G.printCount + '번</div>' +
       '<div class="row"><button class="pill main" aria-label="다시">↻ 다시</button></div>';
     document.getElementById('over').classList.add('show');
   }
@@ -578,30 +602,47 @@
   document.getElementById('over').addEventListener('click', function (e) { if (!e.target.closest('button')) return; audio(); newGame(true); });
 
   /* ---------------- 그리기 (영상 위 투명 캔버스): 실사 잔디 + 실사 비스킷 ---------------- */
-  var IMG = { grass: new Image(), biscuit: new Image() }, wetBiscuit = null;
-  IMG.grass.src = 'real/grass.webp'; IMG.biscuit.src = 'real/biscuit.webp';
-  IMG.biscuit.onload = function () {   // 침에 젖은 비스킷: 어둡게 + 반짝
+  var IMG = { biscuit: new Image() }, BISC = [];
+  IMG.biscuit.src = 'real/biscuit.webp';
+  IMG.biscuit.onload = function () {   // 잇자국 1~3개 비스킷을 미리 깎아 둠 (하트 3 = 잇자국 3)
     try {
-      var b = IMG.biscuit, c = document.createElement('canvas'); c.width = b.width; c.height = b.height; var x = c.getContext('2d');
-      x.drawImage(b, 0, 0); x.globalCompositeOperation = 'source-atop'; x.fillStyle = 'rgba(70,40,20,0.38)'; x.fillRect(0, 0, c.width, c.height);
-      x.fillStyle = 'rgba(255,255,255,0.35)'; x.beginPath(); x.ellipse(c.width * 0.4, c.height * 0.3, c.width * 0.22, c.height * 0.08, -0.1, 0, Math.PI * 2); x.fill();
-      wetBiscuit = c;
-    } catch (e) { wetBiscuit = null; }
+      var b = IMG.biscuit, W = b.width, H = b.height, marks = [[0.9, 0.22, 0.17], [0.1, 0.78, 0.16], [0.52, 0.02, 0.15]];
+      for (var n = 1; n <= 3; n++) {
+        var c = document.createElement('canvas'); c.width = W; c.height = H; var x = c.getContext('2d'); x.drawImage(b, 0, 0);
+        for (var m = 0; m < n; m++) {
+          var mk = marks[m], cx = mk[0] * W, cy = mk[1] * H, r = mk[2] * W;
+          x.globalCompositeOperation = 'destination-out';
+          [-0.55, 0, 0.55].forEach(function (o) { x.beginPath(); x.arc(cx + o * r * 0.9 * (mk[1] < 0.5 ? 1 : -1) * 0.6, cy + o * r * 0.5, r * 0.62, 0, Math.PI * 2); x.fill(); });   // 이빨 자국 세 개가 겹친 반달
+          x.globalCompositeOperation = 'source-atop'; x.strokeStyle = 'rgba(90,50,20,0.55)'; x.lineWidth = W * 0.012;
+          [-0.55, 0, 0.55].forEach(function (o) { x.beginPath(); x.arc(cx + o * r * 0.9 * (mk[1] < 0.5 ? 1 : -1) * 0.6, cy + o * r * 0.5, r * 0.62 + W * 0.006, 0, Math.PI * 2); x.stroke(); });
+        }
+        BISC[n] = c;
+      }
+    } catch (e) { BISC = []; }
   };
   function drawText(t, x, y, size, color, align) { ctx.font = size + 'px Jua, sans-serif'; ctx.textAlign = align || 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'; ctx.lineWidth = size * 0.26; ctx.strokeStyle = OL; ctx.strokeText(t, x, y); ctx.fillStyle = color; ctx.fillText(t, x, y); }
-  function drawGrass() {
-    var g = IMG.grass, top = floorY - 34, h = Hl - top + 4;
-    if (g.complete && g.naturalWidth) { var w = Math.max(Wl, h * g.naturalWidth / g.naturalHeight); ctx.drawImage(g, (Wl - w) / 2, top, w, h); }
-    else { ctx.fillStyle = '#4f9a3a'; ctx.fillRect(0, floorY, Wl, Hl - floorY); }
+  /** 쿠키 밑동 앞풀: 가는 풀잎 몇 가닥을 앞에 그려 잔디에 '놓인' 느낌 */
+  var TUFT = [[-40, 15, -6], [-27, 21, 3], [-14, 17, -2], [-2, 23, 4], [10, 18, -3], [23, 22, 5], [36, 16, -4], [46, 12, 2]];
+  function drawTuft(x, y) {
+    ctx.lineCap = 'round';
+    TUFT.forEach(function (b, i) {
+      var bx = x + b[0], by = y + 26, sway = Math.sin(G.t * 2 + i) * 1.5;
+      ctx.strokeStyle = i % 2 ? 'rgba(78,150,48,0.95)' : 'rgba(110,182,70,0.95)'; ctx.lineWidth = 3.2;
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.quadraticCurveTo(bx + b[2] * 0.4, by - b[1] * 0.6, bx + b[2] + sway, by - b[1]); ctx.stroke();
+    });
   }
   function drawCookie() {
-    var C = G.cookie, x = C.x, y = cookieY(), run = Math.max(-1, Math.min(1, C.run / 900)), sq = C.squash, b = IMG.biscuit, W = 96, H = 46;
-    ctx.save(); ctx.translate(x, y + sq * 6); ctx.rotate(run * 0.2); ctx.scale(1 + 0.35 * sq, 1 - 0.4 * sq);
+    var C = G.cookie; if (C.hidden) return;
+    var x = C.x, y = cookieY(), run = Math.max(-1, Math.min(1, C.run / 900)), sq = C.squash, b = IMG.biscuit, W = 96, H = 46;
+    var pp = C.popT, ps = pp >= 1 ? 1 : pp < 0.6 ? pp / 0.6 * 1.15 : 1.15 - 0.15 * (pp - 0.6) / 0.4;   // 퐁: 0 → 1.15 → 1
+    var fl = C.flinch, fy = -Math.sin(fl * Math.PI) * 12;
+    ctx.save(); ctx.translate(x + fl * 6 * C.fdir, y + sq * 6 + fy); ctx.rotate(run * 0.2 + fl * 0.25 * C.fdir); ctx.scale((1 + 0.35 * sq + fl * 0.12) * ps, (1 - 0.4 * sq - fl * 0.18) * ps);
     if (C.inv > 0 && Math.floor(G.t * 16) % 2) ctx.globalAlpha = 0.55;
     ctx.fillStyle = 'rgba(20,40,10,0.35)'; ctx.beginPath(); ctx.ellipse(0, H * 0.42, W * 0.42, 6, 0, 0, Math.PI * 2); ctx.fill();   // 잔디 위 그림자
-    if (b.complete && b.naturalWidth) { H = W * b.naturalHeight / b.naturalWidth; ctx.drawImage(C.wet > 0 && wetBiscuit ? wetBiscuit : b, -W / 2, -H / 2, W, H); }
-    // 작은 점 눈·입 (질겁·젖음 표정)
-    var sc = C.scared;
+    var bites = Math.max(0, Math.min(3, 3 - G.hearts)), img = BISC[bites] || b;
+    if (b.complete && b.naturalWidth) { H = W * b.naturalHeight / b.naturalWidth; ctx.drawImage(img, -W / 2, -H / 2, W, H); }
+    // 작은 점 눈·입 (평소·질겁)
+    var sc = C.scared || fl > 0.3;
     ctx.fillStyle = '#2b1a12';
     [-9, 9].forEach(function (ex) { ctx.beginPath(); if (sc) ctx.ellipse(ex, -2, 3.4, 4.4, 0, 0, Math.PI * 2); else ctx.arc(ex, -2, 2.8, 0, Math.PI * 2); ctx.fill(); });
     ctx.fillStyle = '#ffffff'; [-9, 9].forEach(function (ex) { ctx.beginPath(); ctx.arc(ex - 0.9, -3.2, sc ? 1.3 : 1, 0, Math.PI * 2); ctx.fill(); });
@@ -609,29 +650,30 @@
     if (sc) ctx.ellipse(0, 6, 2.8, 3.4, 0, 0, Math.PI * 2); else { ctx.moveTo(-4, 5); ctx.quadraticCurveTo(0, 8.5, 4, 5); }
     ctx.stroke();
     ctx.fillStyle = 'rgba(255,110,110,0.4)'; ctx.beginPath(); ctx.ellipse(-17, 4, 4.5, 2.6, 0, 0, Math.PI * 2); ctx.ellipse(17, 4, 4.5, 2.6, 0, 0, Math.PI * 2); ctx.fill();
-    if (C.wet > 0) { ctx.fillStyle = 'rgba(150,205,255,0.9)'; [[-26, -20], [22, -18], [2, -24]].forEach(function (p, i) { var yy = p[1] + ((G.t * 30 + i * 7) % 16); ctx.beginPath(); ctx.moveTo(p[0], yy - 5); ctx.quadraticCurveTo(p[0] + 4, yy + 2, p[0], yy + 4); ctx.quadraticCurveTo(p[0] - 4, yy + 2, p[0], yy - 5); ctx.fill(); }); }
-    if (sc && !C.wet) { ctx.fillStyle = '#8fd6ff'; ctx.beginPath(); ctx.moveTo(30, -18); ctx.quadraticCurveTo(35, -9, 30, -7); ctx.quadraticCurveTo(25, -9, 30, -18); ctx.fill(); }
+    if (sc) { ctx.fillStyle = '#8fd6ff'; ctx.beginPath(); ctx.moveTo(30, -18); ctx.quadraticCurveTo(35, -9, 30, -7); ctx.quadraticCurveTo(25, -9, 30, -18); ctx.fill(); }
     ctx.restore();
+    drawTuft(x, y);
   }
   function drawAim() {
     var a = G.atk; if (!a || !a.st) return;
-    var k = a.st.k, y = cookieY() + 8, pulse = 1 + Math.sin(G.t * 20) * 0.04;
+    var k = a.st.k, y = cookieY() + 12, pulse = 1 + Math.sin(G.t * 20) * 0.04, FL = 0.28;   // 원근: 잔디 위에 납작한 타원
     function ring(x, r, red, al) {
-      ctx.fillStyle = red ? 'rgba(255,80,80,' + 0.34 * al + ')' : 'rgba(255,255,255,' + 0.22 * al + ')'; ctx.beginPath(); ctx.ellipse(x, y, r * pulse, 16 * pulse, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = red ? 'rgba(255,70,70,0.95)' : 'rgba(255,255,255,0.95)'; ctx.lineWidth = 3; ctx.setLineDash([8, 6]); ctx.beginPath(); ctx.ellipse(x, y, r, 16, 0, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = red ? 'rgba(255,80,80,' + 0.34 * al + ')' : 'rgba(255,255,255,' + 0.22 * al + ')'; ctx.beginPath(); ctx.ellipse(x, y, r * pulse, r * FL * pulse, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = red ? 'rgba(255,70,70,0.95)' : 'rgba(255,255,255,0.95)'; ctx.lineWidth = 3; ctx.setLineDash([8, 6]); ctx.beginPath(); ctx.ellipse(x, y, r, r * FL, 0, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
     }
-    if (k === 'tell' || k === 'lunge' || k === 'hold' || k === 'tilt') ring(a.locked ? a.lockX : a.tx, a.r, a.locked, 1);
-    else if ((k === 'paws' || k === 'slam') && a.slams) { var left = a.slams.filter(function (sl) { return !sl.done; }); if (left.length) ring(left[0].x, a.r, true, k === 'paws' ? 0.4 + 0.6 * Math.min(1, a.t / a.dur) : 1); }
+    if (k === 'tell' || k === 'lunge' || k === 'hold' || k === 'tilt') ring(a.locked ? a.lockX : a.ringX, a.r, a.locked, 1);
   }
   function render() {
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); ctx.setTransform(dpr * s, 0, 0, dpr * s, 0, 0);
-    drawGrass(); drawAim(); drawCookie();
-    G.fx.forEach(function (p) { ctx.fillStyle = 'rgba(255,255,255,' + (1 - p.t / p.life) * 0.8 + ')'; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); });
-    G.prints.forEach(function (p) {   // 유리에 남은 코 김서림
-      var al = Math.max(0, 1 - p.t / p.life) * Math.min(1, p.t / 0.6) * 0.5; if (al <= 0) return;
-      var g = ctx.createRadialGradient(p.x, p.y, p.r * 0.2, p.x, p.y, p.r); g.addColorStop(0, 'rgba(255,255,255,' + al * 0.7 + ')'); g.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(p.x, p.y, p.r * 1.1, p.r * 0.85, 0, 0, Math.PI * 2); ctx.fill();
+    // 세계 층(원·쿠키·입자)은 영상과 똑같이 흔들리고 펀치된다
+    ctx.save(); ctx.translate(G.camX + G.ox, G.camY + G.oy); ctx.scale(G.zoom, G.zoom); ctx.translate(-G.ox, -G.oy);
+    drawAim(); drawCookie();
+    G.fx.forEach(function (p) {
+      var al = 1 - p.t / p.life;
+      ctx.fillStyle = p.c === 'blade' ? 'rgba(96,170,58,' + al + ')' : p.c === 'crumb' ? 'rgba(196,132,68,' + al + ')' : 'rgba(255,255,255,' + al * 0.8 + ')';
+      ctx.beginPath(); if (p.c === 'blade') ctx.ellipse(p.x, p.y, p.r * 0.6, p.r * 2.2, p.vx * 0.004, 0, Math.PI * 2); else ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
     });
+    ctx.restore();
     var a = G.atk;
     if (a && a.P.reps && a.st && a.st.k !== 'boop') {   // 연타 ●●●
       var done = a.rep - 1 + ((a.st.k === 'stamp' || a.st.k === 'back') ? 1 : 0);
@@ -646,7 +688,7 @@
     } else {
       drawText('킁킁!', Wl / 2, Hl * 0.08, 60, '#ffffff');
       if (G.best) drawText('최고 ' + G.best, Wl / 2, Hl * 0.08 + 44, 18, '#ffd23f');
-      drawText(ready < FIRST_FILES.length ? '강아지 불러오는 중…' : '쿠키를 끌어서 코를 피해요', Wl / 2, floorY - 60, 22, '#ffffff');
+      drawText(ready < FIRST_FILES.length ? '강아지 불러오는 중…' : '쿠키를 끌어서 앙! 을 피해요', Wl / 2, floorY - 70, 22, '#ffffff');
     }
   }
 
@@ -663,9 +705,11 @@
       return { state: G.state, t: +G.play.toFixed(2), score: G.score, hearts: G.hearts, combo: G.combo, dodges: G.dodges, boops: G.boops, prints: G.printCount, best: G.best,
         ready: ready, readyAll: readyAll, files: FIRST_FILES.length + MORE_FILES.length, kinds: G.kinds.slice(), hitKinds: G.hitKinds.slice(), lanes: G.lanes.slice(), warnF2: G.warnF2,
         clip: cur.f, mir: cur.mir ? 1 : 0, clipT: +(+(VE[cur.f].currentTime) || 0).toFixed(2), shift: Math.round(G.shift), zoom: +G.zoom.toFixed(3),
-        src: VE.sniff ? VE.sniff.currentSrc.split('/').pop() : '',
-        cookie: { x: Math.round(G.cookie.x), sx: toClient(G.cookie.x, 0).x },
-        atk: a && a.st ? { kind: a.kind, step: a.st.k, phase: a.fake ? 'fake' : a.st.k, i: a.i, rep: a.rep, t: +a.t.toFixed(3), fake: a.fake ? 1 : 0, color: a.locked ? 'red' : 'white', first: a.first ? 1 : 0,
+        src: VE[IDLE] ? VE[IDLE].currentSrc.split('/').pop() : '',
+        cookie: { x: Math.round(G.cookie.x), sx: toClient(G.cookie.x, 0).x, sy: toClient(0, cookieY()).y, hidden: G.cookie.hidden ? 1 : 0, bites: Math.max(0, 3 - G.hearts), popT: +G.cookie.popT.toFixed(2) },
+        sfx: { want: SFXN.want, loaded: SFXN.loaded, failed: SFXN.failed }, lanesX: laneX.map(Math.round), slanesX: laneX.map(function (x) { return toClient(x, 0).x; }), budget: Math.round(BUDGET), hsN: G.hsN, hsTotal: +G.hsTotal.toFixed(3), freeze: G.freeze > 0 ? 1 : 0,
+        bite: a && a.set ? (function () { var b = frameToScreen(a.set.bite.x, a.set.bite.y, a.mir), c = toClient(b.x, b.y); return { sx: c.x, sy: c.y }; })() : null,
+        atk: a && a.st ? { kind: a.kind, step: a.st.k, phase: a.fake ? 'fake' : a.st.k, i: a.i, rep: a.rep, t: +a.t.toFixed(3), dur: +a.dur.toFixed(3), fake: a.fake ? 1 : 0, color: a.locked ? 'red' : 'white', first: a.first ? 1 : 0,
           r: Math.round(a.r), tx: aim == null ? null : Math.round(aim), stx: aim == null ? null : toClient(aim, 0).x, lane: a.lane == null ? null : a.lane, key: a.key || null, mir: a.mir ? 1 : 0,
           hits: hits.map(function (v) { return [Math.round(v[0]), Math.round(v[1])]; }), shits: hits.map(function (v) { return [toClient(v[0], 0).x, toClient(v[1], 0).x]; }) } : null,
         nose: { sx: cn.x, sy: cn.y, r: Math.round(n.r * s) }, over: document.getElementById('over').classList.contains('show'), shot: !!G.shot,
@@ -674,6 +718,7 @@
     vlog: function () { return VLOG.slice(); }
   };
 
+  if (Q.get('nocv')) cv.style.opacity = '0';   // 픽셀 검사용 (터치는 그대로 받음)
   resize(); newGame(false); requestAnimationFrame(frame);
 })();
 </script>
