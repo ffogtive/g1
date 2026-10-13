@@ -318,7 +318,8 @@
     if (v._mir !== seg.mir || v.classList.contains('mir') !== seg.mir) { v._mir = seg.mir; v.classList.toggle('mir', seg.mir); }   // 반전은 늘 판정 칸대로
     fading = { v: v, old: old, oldF: cur.f, t: 0 };
     cur = { f: seg.f, mir: seg.mir }; seg.shown = true;
-    VSTAT.cuts++; if (late) VSTAT.late++; VSTAT.waitMax = Math.max(VSTAT.waitMax, seg.waited); if (seg.waited > 0.1) VSTAT.slow++;
+    VSTAT.cuts++; if (late) VSTAT.late++;
+    if (old !== VE.base) { VSTAT.waitMax = Math.max(VSTAT.waitMax, seg.waited); if (seg.waited > 0.1) VSTAT.slow++; }   // 첫 로딩(기준 사진 → 대기)은 뺌
     if (G && G.atk && G.atk.st && G.atk.st.k === 'tell') VSTAT.tellCuts++;   // 늦게 준비돼 예고(킁킁) 안에서 바뀌어도 셈
     vlog('cut', v, seg.waited, mt);
   }
@@ -495,10 +496,30 @@
     if (to === C.row) return false;
     C.row = to; G.hops++; SND.hop(); return true;
   }
+  function newDrag(x, y, t) { return { x: x, y: y, t: t, up: 0, dn: 0, fu: 0, fd: 0, fs: t, hist: [{ t: t, x: x, y: y }], block: 0 }; }
   function startDrag(e, p) {
     try { cv.setPointerCapture(e.pointerId); } catch (er) { /* 무시 */ }
-    var t = performance.now() / 1000;
-    drags[e.pointerId] = { x: p.x, y: p.y, t: t, up: 0, dn: 0, fu: 0, fd: 0, fs: t, hist: [{ t: t, x: p.x, y: p.y }], block: 0 };
+    drags[e.pointerId] = newDrag(p.x, p.y, performance.now() / 1000);
+  }
+  /** 폴짝 판정기: 손가락 움직임 하나(x, y, 초) → 1(뒷줄로) / −1(앞줄로) / 0. 상태는 d에만 (E2E가 실제 폰 타이밍으로 시험) */
+  function hopStep(d, x, y, now, row, rows) {
+    var dx = x - d.x, dy = y - d.y, tPrev = d.t;
+    d.x = x; d.y = y; d.t = now;
+    if (rows < 2) return 0;
+    d.up = Math.max(0, d.up - dy - 0.25 * Math.abs(dx)); d.dn = Math.max(0, d.dn + dy - 0.25 * Math.abs(dx));   // ① 위로 = 뒷줄
+    var vert = Math.abs(dy) > 0.5 && Math.atan2(Math.abs(dy), Math.abs(dx)) >= 50 * Math.PI / 180;   // ③ 튕김: 가파른 움직임이 이어지는 동안만
+    if (vert && dy < 0) { if (!d.fu) d.fs = tPrev; d.fu += -dy - 0.25 * Math.abs(dx); d.fd = 0; }
+    else if (vert && dy > 0) { if (!d.fd) d.fs = tPrev; d.fd += dy - 0.25 * Math.abs(dx); d.fu = 0; }
+    else if (Math.abs(dx) + Math.abs(dy) > 0.5) { d.fu = d.fd = 0; }
+    d.hist.push({ t: now, x: x, y: y }); while (d.hist.length > 2 && now - d.hist[0].t > 0.06) d.hist.shift();
+    if (row >= rows - 1) d.up = 0; if (row <= 0) d.dn = 0;   // 끝 줄에서 더 밀어도 아무 일 없음 (쌓이지도 않음)
+    if (now < d.block) { d.up = d.dn = d.fu = d.fd = 0; return 0; }   // 폴짝 직후 0.1초는 반대 방향 무시
+    var h0 = d.hist[0], ht = Math.max(1e-3, now - h0.t), wx = x - h0.x, wy = y - h0.y, steep = Math.atan2(Math.abs(wy), Math.abs(wx)) >= 35 * Math.PI / 180, ft = Math.max(0.016, now - d.fs);
+    var fastUp = row < rows - 1 && ((-wy / ht >= RULE.HOP_FAST && -wy - 0.25 * Math.abs(wx) >= 16 && steep) || (d.fu >= 16 && d.fu / ft >= RULE.HOP_FAST));   // ② 60ms 창 / ③ 튕김
+    var fastDn = row > 0 && ((wy / ht >= RULE.HOP_FAST && wy - 0.25 * Math.abs(wx) >= 16 && steep) || (d.fd >= 16 && d.fd / ft >= RULE.HOP_FAST));
+    var dir = d.up >= RULE.HOP_SLOW || fastUp ? 1 : d.dn >= RULE.HOP_SLOW || fastDn ? -1 : 0;
+    if (dir) { d.up = d.dn = d.fu = d.fd = 0; d.block = now + 0.1; d.hist = [{ t: now, x: x, y: y }]; }
+    return dir;
   }
   cv.addEventListener('pointerdown', function (e) {
     audio(); warmAll(); var p = toL(e);
@@ -510,24 +531,10 @@
   });
   cv.addEventListener('pointermove', function (e) {
     var d = drags[e.pointerId]; if (!d || !G || G.state !== 'play') return;
-    var p = toL(e), now = performance.now() / 1000, dx = p.x - d.x, dy = p.y - d.y, C = G.cookie, tPrev = d.t;
-    d.x = p.x; d.y = p.y; d.t = now;
-    C.tX = Math.max(-XMAX, Math.min(XMAX, C.tX + dx / FW));
-    if (ROWS < 2) return;
-    d.up = Math.max(0, d.up - dy - 0.25 * Math.abs(dx)); d.dn = Math.max(0, d.dn + dy - 0.25 * Math.abs(dx));   // 위로 = 뒷줄
-    var vert = Math.abs(dy) > 0.5 && Math.atan2(Math.abs(dy), Math.abs(dx)) >= 50 * Math.PI / 180;   // ③ 튕김: 가파른 움직임이 이어지는 동안만
-    if (vert && dy < 0) { if (!d.fu) d.fs = tPrev; d.fu += -dy - 0.25 * Math.abs(dx); d.fd = 0; }
-    else if (vert && dy > 0) { if (!d.fd) d.fs = tPrev; d.fd += dy - 0.25 * Math.abs(dx); d.fu = 0; }
-    else if (Math.abs(dx) + Math.abs(dy) > 0.5) { d.fu = d.fd = 0; }
-    d.hist.push({ t: now, x: p.x, y: p.y }); while (d.hist.length > 2 && now - d.hist[0].t > 0.06) d.hist.shift();
-    if (C.row >= ROWS - 1) d.up = 0; if (C.row <= 0) d.dn = 0;   // 끝 줄에서 더 밀어도 아무 일 없음 (쌓이지도 않음)
-    if (now < d.block) { d.up = d.dn = d.fu = d.fd = 0; return; }   // 폴짝 직후 0.1초는 반대 방향 무시
-    var h0 = d.hist[0], ht = Math.max(1e-3, now - h0.t), wx = p.x - h0.x, wy = p.y - h0.y, steep = Math.atan2(Math.abs(wy), Math.abs(wx)) >= 35 * Math.PI / 180;
-    var ft = Math.max(0.016, now - d.fs);
-    var fastUp = C.row < ROWS - 1 && ((-wy / ht >= RULE.HOP_FAST && -wy - 0.25 * Math.abs(wx) >= 16 && steep) || (d.fu >= 16 && d.fu / ft >= RULE.HOP_FAST));
-    var fastDn = C.row > 0 && ((wy / ht >= RULE.HOP_FAST && wy - 0.25 * Math.abs(wx) >= 16 && steep) || (d.fd >= 16 && d.fd / ft >= RULE.HOP_FAST));
-    var dir = d.up >= RULE.HOP_SLOW || fastUp ? 1 : d.dn >= RULE.HOP_SLOW || fastDn ? -1 : 0;
-    if (dir) { hop(dir); d.up = d.dn = d.fu = d.fd = 0; d.block = now + 0.1; d.hist = [{ t: now, x: p.x, y: p.y }]; }
+    var p = toL(e), C = G.cookie;
+    C.tX = Math.max(-XMAX, Math.min(XMAX, C.tX + (p.x - d.x) / FW));
+    var dir = hopStep(d, p.x, p.y, performance.now() / 1000, C.row, ROWS);
+    if (dir) hop(dir);
   });
   function endP(e) { delete drags[e.pointerId]; }
   cv.addEventListener('pointerup', endP); cv.addEventListener('pointercancel', endP);
@@ -683,7 +690,7 @@
       var combo = a.P.reps && a.rep < a.P.reps && G.endT == null && !a.caught, B = retFrom(a.set, a.stampEnd);
       a.prev = { row: a.lockRow, X: a.lockX };
       if (a.caught) { a.dur = a.set === SP.snap.h ? 1.0 : 1.6; playSeg(a.set.file, a.stampEnd, a.set.up, a.dur, a.mir, null); SND.chew(); }   // 물림: 잔디째 냠냠 → 고개 듦
-      else if (combo) { a.dur = COMBO_BACK * (a.lockRow ? 1.25 : 1); playSeg(B.file, B.from, B.to, a.dur, a.mir, B.file === a.set.file ? idle : null); }   // 연타: 빠르게 고개 듦 (앞으로 이어 든 클립은 대기로 넘겨, 다음 타가 같은 클립·반전이어도 되감기 없이)
+      else if (combo) { a.dur = Math.max(COMBO_BACK * (a.lockRow ? 1.25 : 1), Math.abs(B.to - B.from) / 3.2); playSeg(B.file, B.from, B.to, a.dur, a.mir, B.file === a.set.file ? idle : null); }   // 연타: 빠르게 고개 듦 (앞으로 이어 든 클립은 대기로 넘겨, 다음 타가 같은 클립·반전이어도 되감기 없이)
       else { a.dur = a.set === SP.snap.h ? 0.6 : 0.45; playSeg(B.file, B.from, B.to, a.dur, a.mir, null); G.shiftT = 0; G.shiftYT = 0; }   // 피함: 문 자리에서 그대로 고개 듦
     }
   }
@@ -1055,7 +1062,13 @@
         nose: { sx: cn.x, sy: cn.y, r: Math.round(n.r * s) }, over: document.getElementById('over').classList.contains('show'), shot: !!G.shot,
         vstat: { cuts: VSTAT.cuts, late: VSTAT.late, seekLive: VSTAT.seekLive, resync: VSTAT.resync, tellCuts: VSTAT.tellCuts, minCover: VSTAT.minCover, waitMax: +VSTAT.waitMax.toFixed(3), slow: VSTAT.slow, fading: fading ? 1 : 0 } };
     },
-    vlog: function () { return VLOG.slice(); }
+    vlog: function () { return VLOG.slice(); },
+    /** 시험용: [{t(초), x, y}] 손짓을 폴짝 판정기에 그대로 넣어 폴짝이 언제 나오는지 (게임 상태는 그대로) */
+    simHop: function (samples, row) {
+      var s0 = samples[0], d = newDrag(s0.x, s0.y, s0.t), r = row || 0, hops = [];
+      for (var i = 1; i < samples.length; i++) { var dir = hopStep(d, samples[i].x, samples[i].y, samples[i].t, r, 2); if (dir) { r += dir; hops.push({ i: i, t: +(samples[i].t - s0.t).toFixed(3), dir: dir }); } }
+      return { hops: hops, row: r };
+    }
   };
 
   if (Q.get('nocv')) cv.style.opacity = '0';   // 픽셀 검사용 (터치는 그대로 받음)

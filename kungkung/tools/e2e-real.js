@@ -85,8 +85,8 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
     /** 쿠키를 땅 X·줄로: 가로 끌기 + 필요하면 폴짝 (동시에 = 대각선) */
     T.go = async (X, row) => {   // 엄지처럼: 줄을 바꿀 땐 위·아래로 톡 튕기고(빠른 쓸기) 곧바로 옆으로
       const q = await T.snap(), dx = (X - q.cookie.tX) * T.fw, dy = row == null || row === q.cookie.row ? 0 : row > q.cookie.row ? -60 : 60;
-      if (dy) await T.drag(0, dy, 2);
-      if (Math.abs(dx) > 0.5) await T.drag(dx, 0, 4);
+      if (dy) await T.drag(0, dy, 1);                    // 한 번에 톡 (헤드리스는 터치 이벤트가 약 65ms 간격이라 단계를 줄임)
+      if (Math.abs(dx) > 0.5) await T.drag(dx, 0, 2);
     };
     T.toCell = async name => { const i = CELLS.indexOf(name); await T.go(i % 3 - 1, i >= 3 ? 1 : 0); return T.waitFor(`Math.abs(q.cookie.X - (${i % 3 - 1})) < 0.03 && q.cookie.rowT === ${i >= 3 ? 1 : 0}`, 2000); };
     T.start = async () => {
@@ -179,13 +179,6 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
       T.fx = 358; T.fy = 727; await T.page.waitForTimeout(120);
       const qa = await T.snap();
       ok(`${tag} 엄지 호: 끝에서 끝까지 천천히 끌며 63px 떠도(12°) 폴짝 0회`, qa.hops === hs0 && qa.cookie.row === 0, JSON.stringify({ hops: [hs0, qa.hops], X: qa.cookie.X }));
-      // 리뷰 회귀 ②: 옆으로 빠르게 피한 직후(160px / 0.2초) 위로 25px 튕기면 바로 폴짝
-      await T.press(330, 780);
-      for (let i = 1; i <= 8; i++) { await T.touch('touchMove', 330 - 20 * i, 780); await T.page.waitForTimeout(25); }
-      for (let i = 1; i <= 2; i++) { await T.touch('touchMove', 170, 780 - 12.5 * i); await T.page.waitForTimeout(12); }
-      T.fx = 170; T.fy = 755; await T.page.waitForTimeout(160);
-      const qb2 = await T.snap();
-      ok(`${tag} 옆으로 피한 직후 위로 25px 튕김 → 폴짝`, qb2.cookie.row === 1, JSON.stringify({ row: qb2.cookie.row, hops: qb2.hops }));
       // 리뷰 회귀 ③: 두 번째 손가락은 끌기가 아님 (첫 손가락만)
       await T.lift(); await T.press(195, 780); const xm0 = (await T.snap()).cookie.tX;
       await cdp2(T, [{ x: 195, y: 780 }, { x: 300, y: 790 }], 'touchStart');
@@ -195,6 +188,33 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
       const qm2 = await T.snap();
       ok(`${tag} 멀티터치: 두 번째 손가락을 끌어도 쿠키는 그대로`, Math.abs(qm2.cookie.tX - xm0) < 0.02, JSON.stringify({ tX: [xm0, qm2.cookie.tX] }));
       await T.touch('touchEnd'); T.down = false;
+      if (SP === 'grey') {   // 폴짝 판정기를 실제 폰 타이밍(60·120Hz)의 합성 손짓으로 (헤드리스는 터치가 약 65ms 간격이라 빠른 손짓을 못 흉내 냄)
+        const sim = (samples, row) => T.page.evaluate(([s, r]) => window.kung.simHop(s, r), [samples, row]);
+        const path2 = (n, dt, f) => Array.from({ length: n + 1 }, (_, i) => Object.assign({ t: i * dt }, f(i / n)));
+        let bad = [];
+        for (const hz of [60, 120]) for (const dur of [0.5, 1, 1.5, 2]) for (const rise of [30, 63]) for (const dir of [1, -1]) for (const row of [0, 1]) {   // 63px = 리뷰어가 잰 엄지 호. 90px처럼 크게 휘면(30° 넘게) 규칙상 폴짝이 맞다
+          const n = Math.round(dur * hz), s = path2(n, 1 / hz, u => ({ x: 195 + dir * 149 * (2 * u - 1), y: 760 + (row ? 1 : -1) * rise * Math.sin(Math.PI * u) }));   // 끝에서 끝까지 호 (앞줄은 위로, 뒷줄은 아래로 뜸)
+          const r = await sim(s, row); if (r.hops.length) bad.push({ hz, dur, rise, dir, row, hops: r.hops });
+        }
+        ok('폴짝 판정기: 엄지 호(끝에서 끝까지 298px, 0.5~2초, 30·63px 뜸, 60·120Hz, 양방향, 두 줄) 64가지 모두 폴짝 0회', bad.length === 0, JSON.stringify(bad.slice(0, 4)));
+        bad = [];
+        for (const hz of [60, 120]) for (const dur of [0.12, 0.25, 0.5]) for (const sx of [1, -1]) {
+          const n = Math.max(4, Math.round(dur * hz)), s = path2(n, dur / n, u => ({ x: 195 + sx * 120 * u, y: 760 - 30 * Math.sin(Math.PI * u) }));
+          const r = await sim(s, 0); if (r.hops.length) bad.push({ hz, dur, sx, hops: r.hops });
+        }
+        ok('폴짝 판정기: 가로 120px 쓸기 + 세로 30px 흔들림 (0.12~0.5초, 60·120Hz) 모두 0회', bad.length === 0, JSON.stringify(bad.slice(0, 4)));
+        const res = [];
+        for (const hz of [60, 120]) {
+          const lat = path2(Math.round(0.2 * hz), 1 / hz, u => ({ x: 330 - 160 * u, y: 780 })), last = lat[lat.length - 1];
+          const flick = Array.from({ length: Math.round(0.033 * hz) }, (_, i) => ({ t: last.t + (i + 1) / hz, x: 170, y: 780 - 25 * (i + 1) / Math.round(0.033 * hz) }));
+          res.push((await sim(lat.concat(flick), 0)).hops.length);
+        }
+        ok('폴짝 판정기: 옆으로 빠르게 피한 직후(160px / 0.2초) 위로 25px 튕김(33ms) → 폴짝 (60·120Hz)', res.every(n => n === 1), JSON.stringify(res));
+        const slow44 = await sim(path2(36, 1 / 60, u => ({ x: 195, y: 760 - 44 * u })), 0), slow30 = await sim(path2(36, 1 / 60, u => ({ x: 195, y: 760 - 30 * u })), 0);
+        const diag = await sim(path2(4, 0.015, u => ({ x: 195 + 68 * u, y: 760 - 65 * u })), 0), diag28 = await sim(path2(12, 1 / 60, u => ({ x: 195 + 105 * u, y: 760 - 56 * u })), 0);
+        ok('폴짝 판정기: 천천히 위로 44px(0.6초) → 폴짝, 30px → 없음, 45° 쓸기 68×65px(60ms) → 폴짝, 28° 비스듬한 1칸+56px → 없음(규칙대로)', slow44.hops.length === 1 && !slow30.hops.length && diag.hops.length === 1 && !diag28.hops.length,
+          JSON.stringify({ slow44: slow44.hops, slow30: slow30.hops, diag: diag.hops, diag28: diag28.hops }));
+      }
       await T.close();
     }
     /* ---------- 4. 패턴별: 가만히 → 물림 / 빨간 구간 밖으로 → 다 피함 ---------- */
