@@ -53,7 +53,7 @@ function pick(ids) {
   for (const id of ids) {
     const m = /^([a-z]+)-\d+$/.exec(id), src = path.join(CAND, id + '.mp3'); if (!m || !fs.existsSync(src)) { console.error('없음:', id); continue; }
     const out = path.join(DIR, m[1] + '.mp3');
-    execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', src, '-af', 'silenceremove=start_periods=1:start_threshold=-40dB,loudnorm=I=-16:TP=-1.5:LRA=11', '-ar', '44100', '-ac', '1', '-b:a', '96k', out]);
+    execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', src, '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11,silenceremove=start_periods=1:start_threshold=-45dB', '-ar', '44100', '-ac', '1', '-b:a', '96k', out]);
     M.files[m[1]] = m[1] + '.mp3'; console.log('골랐음', id, '→', path.relative(process.cwd(), out));
   }
   fs.writeFileSync(MAN, JSON.stringify(M, null, 1) + '\n');
