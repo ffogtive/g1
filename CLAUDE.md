@@ -18,5 +18,5 @@
 - `moakung3d/` — 2차 물리 3D 데모 (three.js + cannon-es). 원점 재기획으로 보류.
 - `moakung-v3/` — 재기획 손맛 비교 목업: `index.html`(고르기) → `tower.html`(몽글탑 v0.4: 진짜 물리 planck.js — 끌어 쌓고 스프링 당겨 튕!) / `circle.html`(빙글쿵: 원 그려 모아 쿵). `cloud.html`(몽글탑 C 구름착: 위로 튕겨 구름에 착! 세우기, 친구 동사 — v0.4와 나란히 비교) · `tower-v03.html`은 v0.3 보존 · `tools/sim.js`·`tools/cloud-sim.js`는 각 파일의 WORLD 블록을 그대로 돌리는 물리 계산기 · `vendor/`는 planck.js(MIT).
   (2026-10-13 사용자 요청으로 여기까지 멈춤.)
-- `kungkung/` — 새 게임 "킁킁!": 바닥에서 올려다본 강아지 코 피하기 아케이드. 쿠키를 쓱 끌어 피하고, 다가온 코를 톡 하면 재채기. 그림 버전 `index.html`(캔버스 2D, 견종 회색이·시바, 공격 6종) · 실사 시험판 `real.html`(AI 영상 클립 `real/`을 상태별로 재생) · 실제 터치 E2E `tools/e2e.js`·`tools/e2e-real.js`, 설명·검증은 `README.md`.
+- `kungkung/` — 새 게임 "킁킁!": 바닥에서 올려다본 강아지 코 피하기 아케이드. 쿠키를 쓱 끌어 피하고, 다가온 코를 톡 하면 재채기. 그림 버전 `index.html`(캔버스 2D, 견종 회색이·시바, 공격 6종) · 실사 시험판 `real.html`(AI 영상 클립 `real/`을 상태별로 재생 — 5칸 방향 공격·패턴 7종·실사 잔디/비스킷) · 실제 터치 E2E `tools/e2e.js`·`tools/e2e-real.js`, 설명·검증은 `README.md`.
 - 새 프로젝트는 각자 별도 폴더에서 작업한다.
