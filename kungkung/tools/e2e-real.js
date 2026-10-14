@@ -1,7 +1,7 @@
 // 킁킁! 실사 3열×2줄 E2E (Playwright, 390×844, CDP 실제 터치) — 로컬 HTTP로 열어 아티팩트·앱과 같은 조건(같은 출처)
 // 가설: 칸마다 클립에서 잰 무는 점에 맞춰 영상을 가로·세로로 밀면, 회색이·타조 모두 6칸 어디서든 "그 자리만 앙"이 되고,
 //       상대 끌기 + 폴짝(줄 자석)으로 대각선 회피가 되며, 판정 규칙(같은 줄 + 빨간 타원 안만 아픔)과 끊김 없는 영상 전환이 지켜진다.
-// 실행: node kungkung/tools/e2e-real.js   (PAGE=real3wip.html, SPS=grey,ostrich, BASE_URL=앱 서버, 스크린샷: $OUT)
+// 실행: node kungkung/tools/e2e-real.js   (PAGE=다른 페이지, SPS=grey,ostrich, BASE_URL=앱 서버(소스 폴더), 스크린샷: $OUT)
 'use strict';
 const path = require('path'), fs = require('fs'), os = require('os'), http = require('http');
 let chromium;
@@ -59,6 +59,10 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
 (async () => {
   /* BASE_URL을 주면 그 서버(예: 앱의 Dart 로컬 서버, app/tool/serve.dart)로 돌린다 */
   const srv = process.env.BASE_URL ? null : await serve(), BASE = process.env.BASE_URL ? process.env.BASE_URL.replace(/\/$/, '') + '/' + PAGE : `http://127.0.0.1:${srv.address().port}/${PAGE}`;
+  if (process.env.BASE_URL) {   // 앱 묶음(assets/web, mp4만)을 띄우면 Playwright Chromium은 H.264를 못 틀어 시험이 안 된다
+    const root = process.env.BASE_URL.replace(/\/$/, ''), code = await new Promise(res => http.get(root + '/real/v3/idle.webm', r => { r.resume(); res(r.statusCode); }).on('error', () => res(0)));
+    if (code !== 200) { console.error(`BASE_URL에 webm이 없습니다(HTTP ${code}). 앱 서버 코드를 시험하려면 소스 폴더를 띄우세요: (kungkung/app에서) dart run tool/serve.dart .. 8790`); process.exit(2); }
+  }
   const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] });
   const errs = []; let F2 = 0;
   const V = { cuts: [], late: 0, tellCuts: 0, minCover: 1, seekLive: 0, resync: 0, seeks: [], waitMax: 0, slow: 0 };   // 끊김 지표 (모든 판 합산)
@@ -225,6 +229,14 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
           res.push((await sim(lat.concat(flick), 0)).hops.length);
         }
         ok('폴짝 판정기: 옆으로 빠르게 피한 직후(160px / 0.2초) 위로 25px 튕김(33ms) → 폴짝 (60·120Hz)', res.every(n => n === 1), JSON.stringify(res));
+        const res2 = [];
+        for (const hz of [60, 120]) for (const pause of [0.02, 0.06, 0.12, 0.3]) {
+          const lat = path2(Math.round(0.2 * hz), 1 / hz, u => ({ x: 330 - 160 * u, y: 780 })), last = lat[lat.length - 1], k = Math.max(1, Math.round(0.033 * hz));
+          const flick = Array.from({ length: k }, (_, i) => ({ t: last.t + pause + (i + 1) / hz, x: 170, y: 780 - 25 * (i + 1) / k }));
+          const still = [{ t: 0, x: 195, y: 780 }].concat(Array.from({ length: k }, (_, i) => ({ t: 0.3 + (i + 1) / hz, x: 195, y: 780 - 25 * (i + 1) / k })));
+          res2.push((await sim(lat.concat(flick), 0)).hops.length, (await sim(still, 0)).hops.length);
+        }
+        ok('폴짝 판정기: 피한 뒤 20~300ms 멈췄다가, 또는 0.3초 가만히 있다가 위로 25px 튕김 → 폴짝 (60·120Hz)', res2.every(n => n === 1), JSON.stringify(res2));
         const slow44 = await sim(path2(36, 1 / 60, u => ({ x: 195, y: 760 - 44 * u })), 0), slow30 = await sim(path2(36, 1 / 60, u => ({ x: 195, y: 760 - 30 * u })), 0);
         const diag = await sim(path2(4, 0.015, u => ({ x: 195 + 68 * u, y: 760 - 65 * u })), 0), diag28 = await sim(path2(12, 1 / 60, u => ({ x: 195 + 105 * u, y: 760 - 56 * u })), 0);
         ok('폴짝 판정기: 천천히 위로 44px(0.6초) → 폴짝, 30px → 없음, 45° 쓸기 68×65px(60ms) → 폴짝, 28° 비스듬한 1칸+56px → 없음(규칙대로)', slow44.hops.length === 1 && !slow30.hops.length && diag.hops.length === 1 && !diag28.hops.length,

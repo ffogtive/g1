@@ -97,7 +97,7 @@ flutter run --release -d <아이폰 ID>
 
 앱과 같은 서버 코드로 띄운다.
 ```bash
-dart run tool/serve.dart            # http://127.0.0.1:8790/real.html
+dart run tool/serve.dart            # 앱 묶음(assets/web, mp4만) → http://127.0.0.1:8790/real.html (Safari로 확인)
 ```
 
 ## 나중에: TestFlight로 다른 사람에게
@@ -122,6 +122,10 @@ dart run tool/serve.dart            # http://127.0.0.1:8790/real.html
 
 **검증 (Linux 컨테이너):**
 - `flutter analyze` 0건, `flutter test` 7/7
-- 같은 서버 코드로 게임 E2E 49/49: `BASE_URL=http://127.0.0.1:8790 node ../tools/e2e-real.js`
+- 같은 서버 코드로 게임 E2E: `dart run tool/serve.dart .. 8790`(소스 폴더: webm 포함)을 띄우고 `BASE_URL=http://127.0.0.1:8790 node ../tools/e2e-real.js`
+  - 앱 묶음(assets/web)은 mp4만 있어 Playwright Chromium(H.264 없음)으로는 E2E를 못 돌린다. E2E는 서버 코드를 검증하고, 앱 묶음은 `flutter test`(부르는 파일이 다 있는지)로 검증한다.
+- 아이폰에서만 확인할 수 있는 것 (Safari 웹 검사기에서 `kung.snapshot().vstat` 보기, 디버그 빌드):
+  - 영상 15개를 동시에 두어도 전환이 늦지 않은지(`slow`·`late`·`waitMax`)와 메모리
+  - 손을 뗄 때 접촉점이 튀어 폴짝이 나는 일이 없는지
 
 실제 아이폰 빌드와 실행은 Mac에서 확인한다.

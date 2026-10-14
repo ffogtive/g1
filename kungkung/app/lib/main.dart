@@ -2,6 +2,8 @@
 //
 // 가설: 게임 규칙·영상 전환·효과음은 이미 검증된 웹 엔진에 두고, 앱은 파일 묶기·전체 화면·
 // 진동(햅틱)·화면 꺼짐 방지만 맡으면 아이폰에서 그대로 돈다.
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -26,12 +28,28 @@ Future<Uint8List?> loadBundledAsset(String path) async {
   }
 }
 
+/// 게임 페이지 출처(http://127.0.0.1:<포트>)를 매번 같게: 종 선택·최고 기록(localStorage)이 출처별로 저장되기 때문.
+/// 고정 포트를 차례로 시도하고, 모두 쓰이고 있으면 아무 포트나 쓴다(그때만 기록이 따로 남음).
+const List<int> stablePorts = <int>[47821, 47822, 47823];
+
+Future<void> startOnStablePort(LocalGameServer server) async {
+  for (final port in stablePorts) {
+    try {
+      await server.start(port: port);
+      return;
+    } on SocketException {
+      // 다음 포트
+    }
+  }
+  await server.start();
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations(<DeviceOrientation>[DeviceOrientation.portraitUp]);
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   final server = LocalGameServer(loadBundledAsset);
-  await server.start();
+  await startOnStablePort(server);
   runApp(KungkungApp(server: server));
 }
 

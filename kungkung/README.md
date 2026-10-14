@@ -125,5 +125,5 @@
   - 일반 브라우저에서의 동작은 그대로다.
 - 검증(Linux 컨테이너):
   - `flutter analyze` 0건, 서버 단위 테스트 7/7
-  - 앱 서버 코드(`app/tool/serve.dart`)로 E2E 49/49: `BASE_URL=http://127.0.0.1:8790 node tools/e2e-real.js`
+  - 앱 서버 코드(`app/tool/serve.dart`)로 E2E: (kungkung/app에서) `dart run tool/serve.dart .. 8790` → `BASE_URL=http://127.0.0.1:8790 node tools/e2e-real.js`
   - 앱 경로 점검: mp4만 쓰는지, 물리면 `buzz:40,30,60`이 앱으로 가는지

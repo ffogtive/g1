@@ -10,6 +10,11 @@ void main() {
   final page = File('assets/web/real.html');
   final synced = page.existsSync();
 
+  test('앱 안 real.html이 원본(../real.html)과 같음 — 원본을 고치고 sync를 잊으면 실패', () {
+    final src = File('../real.html');
+    expect(page.readAsStringSync() == src.readAsStringSync(), isTrue, reason: 'tool/sync_web.sh를 다시 돌린다');
+  }, skip: synced && File('../real.html').existsSync() ? false : 'tool/sync_web.sh를 먼저 돌린다');
+
   test('real.html이 부르는 클립이 모두 mp4로 들어 있음', () {
     final html = page.readAsStringSync();
     final clips = RegExp(r"'((?:v3|ostrich)/[a-z0-9_]+)'").allMatches(html).map((m) => m.group(1)!).toSet();
