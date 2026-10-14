@@ -8,27 +8,52 @@
 
 그래서 웹 쪽을 고친 뒤 `tool/sync_web.sh`만 다시 돌리면 앱에 그대로 들어간다.
 
-## 가장 쉬운 설치·업데이트 (Mac에서 더블클릭)
+## 가장 쉬운 설치·업데이트 (Mac 터미널에 한 줄)
 
-**가설:** 서명 팀과 아이폰을 Mac이 스스로 찾고, 빌드부터 설치·실행까지 한 번에 하면 업데이트는 `git pull` 뒤 더블클릭 한 번이다.
+**가설:** 비개발자도 같은 한 줄을 붙여 넣는 것만으로 처음 설치와 업데이트를 할 수 있어야 한다. 이를 위해 스크립트가 아래를 스스로 한다.
+- 최신 코드를 받는다.
+- 고정 버전 Flutter를 받는다.
+- 서명 팀과 아이폰을 찾는다.
+- 어느 단계에서도 숨은 질문으로 멈추지 않는다.
 
-```bash
-cd g1 && git pull           # 받은 뒤
-open kungkung/app/tool      # Finder에서 deploy-iphone.command 더블클릭 (또는 Terminal에서 ./kungkung/app/tool/deploy-iphone.command)
+**하기 전에:**
+1. 아이폰을 USB로 Mac에 연결하고 잠금을 푼다.
+2. Mac 화면에서 **터미널** 앱을 연다(Spotlight에서 "터미널").
+
+**붙여 넣을 한 줄** (처음과 업데이트 모두 같다):
 ```
-- 하는 일:
-  1. 게임 파일을 복사하고(`sync_web.sh`) Flutter를 설정한다.
-  2. 실제 기기용으로 서명해 빌드한다(Release).
-  3. 서명과 Bundle ID(`com.ffogtive.kungkung`)를 확인한다.
-  4. `devicectl`로 설치하고 실행한다. 기존 앱은 지우지 않고 덮어쓴다.
-- **서명 팀**은 Xcode에 로그인한 계정의 Apple Development 인증서에서 찾는다. **아이폰**은 Mac과 페어링된 기기 하나를 찾는다.
-  - 팀이나 기기가 여럿이면 `tool/deploy.local`에 `DEPLOY_TEAM=…`, `DEPLOY_DEVICE=…`를 적는다.
-  - 이 파일은 깃에 올라가지 않는다. 저장소가 공개라 ID를 저장소에 두지 않는다.
+mkdir -p ~/Projects && cd ~/Projects && { [ -d kungkung-iphone/.git ] || { rm -rf kungkung-iphone && git clone --depth 1 -b claude/moakung-game-prototype-jd8esd https://github.com/ffogtive/g1.git kungkung-iphone; }; } && cd kungkung-iphone && git fetch -q --depth 1 origin claude/moakung-game-prototype-jd8esd && git checkout -q -f -B deploy FETCH_HEAD && ./kungkung/app/tool/deploy-iphone.command
+```
+
+**걸리는 시간과 할 일:**
+- 처음은 15~25분 걸린다. Flutter 3.47.7 약 2.3GB를 `~/.kungkung/flutter`에 받고, 첫 빌드를 한다. 다음부터는 몇 분이다.
+- 키체인 창이 뜨면 Mac 로그인 암호를 넣고 **"항상 허용"**을 누른다.
+- 팀이나 아이폰이 여럿이면 번호를 묻는다. 고른 팀은 `tool/deploy.local`에 저장되고, 이 파일은 깃에 올라가지 않는다.
+
+**결과 읽기:**
+- 끝에 **"✓ 아이폰에서 킁킁! 실행됨"**이 나오면 성공이다.
+- **"✗ 실패"**가 나오면 그 위 20줄쯤을 복사해 Claude에게 보낸다. 대부분은 화면에 할 일(→)이 함께 나온다.
+
+**스크립트가 하는 일** (`tool/deploy-iphone.command`):
+1. Xcode가 실제로 선택돼 있는지 확인한다.
+2. Flutter를 고정 버전으로 받는다. 체크섬을 확인하고, 끊기면 다시 실행할 때 이어 받는다.
+3. 서명 팀을 찾는다. 키체인의 유효한 Apple Development 인증서만 본다.
+4. 아이폰을 찾는다. 예전 기기·아이패드·꺼진 기기는 뺀다.
+5. 게임 파일을 복사하고(`sync_web.sh`) Flutter를 설정한다. 플러그인은 Swift Package Manager로 들어가므로 CocoaPods가 필요 없다.
+6. 실제 기기용 Release로 서명 빌드한다.
+7. 서명과 Bundle ID(`com.ffogtive.kungkung`)를 확인한다.
+8. `devicectl`로 설치하고 실행한다. 기존 앱은 지우지 않고 덮어쓴다.
+
+**참고:**
+- 한 줄 명령은 전용 폴더 `~/Projects/kungkung-iphone`을 늘 원격 최신 커밋에 맞춘다.
+  - 그 폴더에서 바뀐 추적 파일(빌드가 건드린 것)은 버린다.
+  - `assets/web`, `.local`, `deploy.local`은 남는다.
+  - 그 폴더에서 코드를 고치지 않는다.
 - 로그는 `kungkung/app/.local/deploy-runs/<시각>/`에 남는다. `build.log`, `install.json`, `launch.json`, `exit-code`가 있다.
-- SSH로 실행하면 키체인 서명이 실패할 수 있다(`errSecInternalComponent`). 로그인된 Mac에서 더블클릭으로 실행한다.
-- 처음 한 번은 아래 1·4절(Xcode 계정 로그인, 아이폰 신뢰·개발자 모드)이 먼저 되어 있어야 한다.
-- 클라우드의 Claude 세션은 Mac에 닿지 못한다. 그래서 설치는 이 스크립트를 Mac에서 실행해서 한다.
+- SSH로 실행하면 키체인 서명이 실패할 수 있다(`errSecInternalComponent`). 로그인된 Mac 화면의 터미널에서 실행한다.
+- 클라우드의 Claude 세션은 Mac에 닿지 못한다. 그래서 설치는 이 한 줄로 Mac에서 한다.
   - Mac에 GitHub self-hosted runner를 붙이는 방법도 있지만, 이 저장소는 공개라 쓰지 않는다. 공개 저장소에서 runner를 쓰면 남의 코드가 내 Mac에서 돌 수 있다.
+- 처음 한 번은 아래 1·4절(Xcode 계정 로그인, 아이폰 신뢰·개발자 모드)이 먼저 되어 있어야 한다.
 
 ## 1. Mac 준비 (처음 한 번)
 
@@ -36,12 +61,15 @@ open kungkung/app/tool      # Finder에서 deploy-iphone.command 더블클릭 (�
    ```bash
    sudo xcodebuild -runFirstLaunch
    ```
-2. **CocoaPods**: `brew install cocoapods`
-3. **Flutter**: 3.47.7 이상(stable)이 필요하다. `brew install --cask flutter` 또는 [공식 설치](https://docs.flutter.dev/get-started/install/macos)로 설치한다.
-4. `flutter doctor`를 실행해 Xcode 줄에 체크가 뜨는지 본다.
-5. **Xcode에 Apple 계정 추가**: Xcode → Settings → Accounts에 유료 개발자 계정을 추가한다.
+2. **Xcode에 Apple 계정 추가**: Xcode → Settings → Accounts에 유료 개발자 계정을 추가한다.
+3. **Flutter·CocoaPods는 따로 설치하지 않는다.**
+   - 위 한 줄 스크립트가 `~/.kungkung/flutter`에 3.47.7을 받는다.
+   - 플러그인은 Swift Package Manager로 들어가므로 CocoaPods가 필요 없다.
+   - 직접 개발할 때는 그 Flutter를 쓴다: `export PATH="$HOME/.kungkung/flutter/bin:$PATH"`
 
-## 2. 코드 받기와 게임 파일 넣기
+## 2~6. (개발자용 수동 경로) 코드 받기와 게임 파일 넣기
+
+> 설치만 할 때는 맨 위의 한 줄이면 된다. 아래 2·3·5·6절은 코드를 직접 고치며 `flutter run`으로 돌릴 때 쓴다. 4절(아이폰 준비)은 둘 다 처음 한 번 필요하다.
 
 ```bash
 git clone https://github.com/ffogtive/g1.git
@@ -51,7 +79,7 @@ cd kungkung/app
 flutter pub get
 ```
 
-## 3. 서명 (처음 한 번)
+## 3. 서명 (수동 경로에서 처음 한 번 — 한 줄 스크립트는 팀을 자동으로 넣는다)
 
 ```bash
 open ios/Runner.xcworkspace
@@ -90,7 +118,9 @@ flutter run --release -d <아이폰 ID>
 | 화면이 하늘색만 나오고 게임이 안 뜬다 | 디버그로 실행(`flutter run -d <ID>`)한다. Mac Safari → 설정 → 고급에서 "웹 개발자용 기능 보기"를 켜고, **개발자 메뉴 → 아이폰 → 127.0.0.1** 페이지의 콘솔 오류를 본다(디버그 빌드에서만 연결된다) |
 | 소리가 안 난다 | 화면을 한 번 터치해야 소리가 켜진다(웹 오디오 규칙). 앱은 무음 스위치와 상관없이 소리가 나게 해 두었다. 무음 스위치를 따르게 하려면 `ios/Runner/AppDelegate.swift`에서 `.playback`을 `.ambient`로 바꾼다 |
 | `Could not locate device support files` | Xcode를 아이폰 iOS 버전에 맞게 업데이트한다 |
-| CocoaPods 오류 | `cd ios && pod repo update && pod install && cd ..` |
+| CocoaPods 오류 | 이 앱은 Swift Package Manager를 써서 CocoaPods가 필요 없다(`ios/Podfile` 없음). 그래도 나오면 메시지를 Claude에게 보낸다 |
+| `requires Xcode, but active developer directory … CommandLineTools` | `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer && sudo xcodebuild -runFirstLaunch` |
+| `다른 창에서 설치가 진행 중` | 다른 터미널 창이 아직 돌고 있다. 그 창이 끝난 뒤 다시 실행한다. 창을 닫아 남은 잠금은 스크립트가 스스로 치운다 |
 | 디버그 빌드를 홈 화면에서 열면 바로 꺼진다 | iOS 정책상 디버그 빌드는 Mac에 연결돼 있어야 한다. 평소에는 `--release`로 설치한다 |
 
 ## Mac 브라우저로 먼저 확인
@@ -114,7 +144,7 @@ dart run tool/serve.dart            # 앱 묶음(assets/web, mp4만) → http://
 | `lib/local_server.dart` | 127.0.0.1 로컬 서버. GET·HEAD, Range 206·416, MIME, 경로 탈출 차단. flutter 없이 `dart:io`만 쓴다 |
 | `tool/sync_web.sh` | `../real.html`, `../real/`(v3·ostrich mp4·jpg, sfx, webp)을 `assets/web/`으로 복사한다. webm은 넣지 않는다 |
 | `tool/serve.dart` | 같은 서버를 Mac이나 컨테이너에서 띄운다. 브라우저 확인과 E2E에 쓴다 |
-| `tool/deploy-iphone.command` | Mac에서 더블클릭: 게임 파일 복사 → 기기용 서명 빌드 → 설치 → 실행 (팀·기기 자동, 로그 `.local/deploy-runs/`) |
+| `tool/deploy-iphone.command` | Mac에서(위 한 줄 또는 더블클릭): Flutter 3.47.7 고정 설치 → 게임 파일 복사 → 기기용 서명 빌드 → 설치 → 실행 (팀·기기 자동, 로그 `.local/deploy-runs/`) |
 | `test/assets_test.dart` | real.html이 부르는 클립(mp4)·사진·소리가 앱 안에 모두 있는지 (`sync_web.sh` 뒤 `flutter test`) |
 | `test/local_server_test.dart` | 서버 단위 테스트 7개 (`flutter test`) |
 | `ios/Runner/Info.plist` | 이름 "킁킁!", 세로, 상태 표시줄 숨김, 로컬 서버 허용(`NSAllowsLocalNetworking`) |
