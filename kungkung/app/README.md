@@ -20,15 +20,17 @@
 1. 아이폰을 USB로 Mac에 연결하고 잠금을 푼다.
 2. Mac 화면에서 **터미널** 앱을 연다(Spotlight에서 "터미널").
 
-**붙여 넣을 한 줄** (처음과 업데이트 모두 같다):
+**붙여 넣을 한 줄** (처음과 업데이트 모두 같다. 붙여 넣은 뒤 **Enter**):
 ```
 mkdir -p ~/Projects && cd ~/Projects && { [ -d kungkung-iphone/.git ] || { rm -rf kungkung-iphone && git clone --depth 1 -b claude/moakung-game-prototype-jd8esd https://github.com/ffogtive/g1.git kungkung-iphone; }; } && cd kungkung-iphone && git fetch -q --depth 1 origin claude/moakung-game-prototype-jd8esd && git checkout -q -f -B deploy FETCH_HEAD && ./kungkung/app/tool/deploy-iphone.command
 ```
 
 **걸리는 시간과 할 일:**
 - 처음은 15~25분 걸린다. Flutter 3.47.7 약 2.3GB를 `~/.kungkung/flutter`에 받고, 첫 빌드를 한다. 다음부터는 몇 분이다.
+- 그동안 Mac이 잠들지 않게 스크립트가 막는다. 다만 맥북 **덮개를 닫으면** 잠드니 열어 둔다.
 - 키체인 창이 뜨면 Mac 로그인 암호를 넣고 **"항상 허용"**을 누른다.
-- 팀이나 아이폰이 여럿이면 번호를 묻는다. 고른 팀은 `tool/deploy.local`에 저장되고, 이 파일은 깃에 올라가지 않는다.
+- 팀이나 아이폰이 여럿이면 번호를 묻는다. 고른 팀은 `tool/deploy.local`에 저장되고, 이 파일은 깃에 올라가지 않는다. 잘못 골랐으면 실패 화면에 나오는 `rm …deploy.local` 줄을 붙여 넣고 다시 실행한다.
+- 아이폰은 그 아이폰을 대상으로 빌드한다. 그래서 새 아이폰도 서명 팀에 자동으로 등록된다.
 
 **결과 읽기:**
 - 끝에 **"✓ 아이폰에서 킁킁! 실행됨"**이 나오면 성공이다.
@@ -120,6 +122,8 @@ flutter run --release -d <아이폰 ID>
 | `Could not locate device support files` | Xcode를 아이폰 iOS 버전에 맞게 업데이트한다 |
 | CocoaPods 오류 | 이 앱은 Swift Package Manager를 써서 CocoaPods가 필요 없다(`ios/Podfile` 없음). 그래도 나오면 메시지를 Claude에게 보낸다 |
 | `requires Xcode, but active developer directory … CommandLineTools` | `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer && sudo xcodebuild -runFirstLaunch` |
+| (한 줄을 붙여 넣자마자) `You have not agreed to the Xcode license agreements` | Xcode가 업데이트된 뒤다. `sudo xcodebuild -license accept`(Mac 암호 입력) 뒤 같은 한 줄을 다시 실행한다 |
+| (한 줄을 붙여 넣자마자) `Could not resolve host: github.com` | 인터넷 연결을 확인하고 다시 실행한다 |
 | `다른 창에서 설치가 진행 중` | 다른 터미널 창이 아직 돌고 있다. 그 창이 끝난 뒤 다시 실행한다. 창을 닫아 남은 잠금은 스크립트가 스스로 치운다 |
 | 디버그 빌드를 홈 화면에서 열면 바로 꺼진다 | iOS 정책상 디버그 빌드는 Mac에 연결돼 있어야 한다. 평소에는 `--release`로 설치한다 |
 
