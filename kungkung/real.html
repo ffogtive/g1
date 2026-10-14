@@ -509,8 +509,8 @@
   }
   /** 폴짝 판정기: 손가락 움직임 하나(x, y, 초) → 1(뒷줄로) / −1(앞줄로) / 0. 상태는 d에만 (E2E가 실제 폰 타이밍으로 시험) */
   function hopStep(d, x, y, now, row, rows) {
-    var dx = x - d.x, dy = y - d.y, tPrev = d.t;
-    if (now - tPrev > 0.03) { tPrev = now - 1 / 60; d.hist = [{ t: tPrev, x: d.x, y: d.y }]; d.fs = tPrev; }   // 멈춰 있다 막 움직임: 이 움직임은 마지막 한 프레임 동안 (멈춘 시간을 속도에 섞지 않음)
+    var dx = x - d.x, dy = y - d.y, tPrev = d.t, gap = now - tPrev;
+    if (gap > 0.03) { tPrev = now - 1 / 60; d.hist = [{ t: tPrev, x: d.x, y: d.y }]; d.fs += gap - 1 / 60; }   // 멈춰 있다 막 움직임: 이 움직임은 마지막 한 프레임 동안 (멈춘 시간만 빼고, 쌓이던 튕김의 시간은 그대로)
     d.x = x; d.y = y; d.t = now;
     if (rows < 2) return 0;
     d.up = Math.max(0, d.up - dy - 0.25 * Math.abs(dx)); d.dn = Math.max(0, d.dn + dy - 0.25 * Math.abs(dx));   // ① 위로 = 뒷줄

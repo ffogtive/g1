@@ -241,6 +241,12 @@ const cdiff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs
         const diag = await sim(path2(4, 0.015, u => ({ x: 195 + 68 * u, y: 760 - 65 * u })), 0), diag28 = await sim(path2(12, 1 / 60, u => ({ x: 195 + 105 * u, y: 760 - 56 * u })), 0);
         ok('폴짝 판정기: 천천히 위로 44px(0.6초) → 폴짝, 30px → 없음, 45° 쓸기 68×65px(60ms) → 폴짝, 28° 비스듬한 1칸+56px → 없음(규칙대로)', slow44.hops.length === 1 && !slow30.hops.length && diag.hops.length === 1 && !diag28.hops.length,
           JSON.stringify({ slow44: slow44.hops, slow30: slow30.hops, diag: diag.hops, diag28: diag28.hops }));
+        // 리뷰 회귀 ②: 띄엄띄엄 오는 표본(65ms 간격 5px씩, 또는 80ms 멈췄다 7px씩)은 느린 끌기 — 멈춘 시간을 빼도 쌓인 튕김 시간은 그대로
+        const steps = (n, gap, dy) => Array.from({ length: n + 1 }, (_, i) => ({ t: i * gap, x: 195, y: 760 + dy * i / n }));
+        const stopgo = [{ t: 0, x: 195, y: 760 }]; for (let b = 0, tt = 0, yy = 760; b < 4; b++) { tt += 0.08; yy -= 3; stopgo.push({ t: tt, x: 195, y: yy }); tt += 1 / 60; yy -= 4; stopgo.push({ t: tt, x: 195, y: yy }); }
+        const st30 = await sim(steps(6, 0.065, -30), 0), st46 = await sim(steps(6, 0.065, -46), 0), sg28 = await sim(stopgo, 0);
+        ok('폴짝 판정기: 65ms 간격 계단 끌기 위로 30px → 없음, 46px → 폴짝, 멈췄다 가는 느린 끌기 28px → 없음', !st30.hops.length && st46.hops.length === 1 && !sg28.hops.length,
+          JSON.stringify({ st30: st30.hops, st46: st46.hops, sg28: sg28.hops }));
       }
       await T.close();
     }
