@@ -1,0 +1,1345 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>구름착 목업</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
+<!--
+  모아쿵! 몽글탑 C "구름착" — 비교 목업 (v0.4 '쿵'과 나란히)
+  가설: 앵그리버드 같다는 느낌은 "옆으로 쏴서 남의 요새를 부순다"에서 온다. 재미가 확인된 아슬아슬 쌓기 + 스프링 튕기기는 그대로 두고,
+        목표를 "위로 튕겨 내 탑을 구름에 착! 세우기"로 뒤집는다. 친구마다 동사 하나 — 개성이 화면에 보이게.
+  - 구름은 아래에서 통과, 위에서만 밟힘(몽글 구름). 착지해서 선 친구만 다음 구름으로 데려간다 → 많이 쌓을수록 다 데려가지만 아슬아슬.
+  - 동사: 꽝돌(맨 아래면 오뚝이 — 비행 중 탑을 바로 세움, 무게중심 길은 그대로) · 부풀(날 때 톡 → 빵빵 낙하산) ·
+          몽이(스프링 바로 위면 한 번 더 통 +20%) · 길쭉(높이를 싸게, 대신 위가 흔들). 서로 닿은 친구는 날 때 붙어 있다가 세게 부딪치면 똑 끊김.
+  - 착지: 슬로모 → 도장 "착!" → 아래부터 착-착-착 → 자동 인증샷 → 기다리던 친구 "나도!" → 다음 구름.
+  - 밸런스는 tools/cloud-sim.js 가 이 파일의 WORLD 블록을 그대로 돌려 확인한다.
+-->
+<style>
+  :root { --ink:#3b2a22; --pill:rgba(255,255,255,.92); --line:#e7d6c8; --accent:#ff7a59; --gold:#ffc23a; color-scheme: light; }
+  html, body { margin:0; height:100%; overscroll-behavior:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent; touch-action:none; color:var(--ink); background:#a9dcff; font-family:"Jua","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif; }
+  #app { position:fixed; inset:0; display:flex; flex-direction:column; background:linear-gradient(#a9dcff, #e9f6ff 45%, #fff1cf);
+    padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); }
+  #bar { flex:none; height:52px; display:flex; align-items:center; gap:8px; padding:0 10px; }
+  .pill { min-width:44px; height:40px; border:0; border-radius:999px; background:var(--pill); box-shadow:0 2px 0 var(--line); font:inherit; font-size:20px; color:var(--ink); padding:0 12px; display:grid; place-items:center; cursor:pointer; }
+  .pill:active { transform:translateY(1px); }
+  #flags { flex:1; display:flex; gap:4px; align-items:center; min-width:0; }
+  .flag { width:22px; height:26px; flex:none; transition:opacity .3s, transform .3s; }
+  .flag.used { opacity:.22; transform:scale(.85); }
+  #score { font-variant-numeric:tabular-nums; min-width:64px; }
+  #stage { flex:1; position:relative; min-height:0; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; touch-action:none; display:block; }
+  #over { position:absolute; inset:0; display:none; place-items:center; background:rgba(59,42,34,.35); z-index:5; }
+  #over.show { display:grid; }
+  .card { background:#fffaf3; border-radius:24px; padding:20px 24px; text-align:center; box-shadow:0 12px 40px rgba(59,42,34,.35); animation:pop .3s cubic-bezier(.2,1.5,.5,1); }
+  @keyframes pop { from { transform:scale(.8); opacity:0; } }
+  .stars { font-size:52px; letter-spacing:4px; line-height:1.1; }
+  .stars span { display:inline-block; animation:starIn .45s cubic-bezier(.2,1.8,.5,1) both; }
+  .stars span:nth-child(2) { animation-delay:.35s; } .stars span:nth-child(3) { animation-delay:.7s; }
+  @keyframes starIn { from { transform:scale(0) rotate(-40deg); opacity:0; } }
+  .stars .on { color:var(--gold); text-shadow:0 3px 0 #d8962a; } .stars .off { color:#e3d6c9; }
+  .big { font-size:30px; margin:6px 0 4px; font-variant-numeric:tabular-nums; }
+  .sub { font-size:15px; color:#8a6a5a; margin-bottom:14px; }
+  .row { display:flex; gap:10px; justify-content:center; }
+  .row .pill { font-size:24px; height:52px; min-width:72px; }
+  .row .pill.main { background:var(--accent); color:#fff; box-shadow:0 3px 0 #c9553a; }
+  #rot { position:fixed; inset:0; display:none; place-items:center; text-align:center; font-size:22px; background:#fff1cf; z-index:20; padding:24px; }
+  @media (orientation: landscape) and (max-height: 520px) { #rot { display:grid; } }
+  #err { position:absolute; inset:0; display:none; place-items:center; padding:24px; text-align:center; font-size:18px; z-index:9; background:#fff1cf; }
+</style>
+</head>
+<body>
+<div id="rot">📱 세로로 돌려 주세요</div>
+<div id="app">
+  <div id="bar">
+    <button id="back" class="pill" aria-label="목업 고르기로">←</button>
+    <div id="flags" aria-label="남은 발사"></div>
+    <div id="score" class="pill" aria-label="점수">0</div>
+    <button id="restart" class="pill" aria-label="다시">↻</button>
+  </div>
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="over"><div class="card" id="card"></div></div>
+    <div id="err">물리 엔진(vendor/planck.min.js)을 불러오지 못했어요.<br>폴더째 열었는지 확인해 주세요.</div>
+  </div>
+</div>
+<script src="vendor/planck.min.js"></script>
+<script>
+/*WORLD-START*/
+// 몽글탑 C "구름착" 물리 규칙 — 목업(cloud.html)과 계산기(tools/cloud-sim.js)가 이 블록을 그대로 같이 쓴다.
+// 결정론: 이 안에는 무작위·시각 의존이 없다 (같은 입력 → 같은 결과).
+// 바탕은 v0.4(tower.html)의 쌓기·스프링·점선. 다른 점: 위로 쏴서 구름에 "착!" 세우기 + 친구 동사.
+var PL = planck;
+var PHY = {
+  G: 10, DT: 1 / 60, VI: 10, PI: 6,
+  V_MAX: 16.5, M0: 3, P_MIN: 0.2, ANG_MIN: 35, ANG_MAX: 145,     // 위로 쏜다: 오른쪽 위 35° ~ 왼쪽 위 145°
+  PULL_X: 0.15, PULL_Y: 0.55, PULL_V: 1.6, PULL_A: 6, TILT: 0.06,
+  PLATE: { hw: 0.75, hh: 0.1, mass: 3, kx: 2500, cx: 87, ky: 900, cy: 30, kr: 300, cr: 10.5 },
+  HOLD_T: 0.25, GUIDE_T0: 0.1, GUIDE_T1: 0.55, QUIET_V: 0.12, QUIET_W: 0.3,
+  WELD_HZ: 4, WELD_DAMP: 0.7, WELD_BREAK: 140,          // 날 때 서로 닿은 친구는 부드럽게 붙음 · 세게 부딪치면 끊어져 와르르
+  SPIN: 0.22,                                            // 삐딱하게 쌓으면(무게중심이 받침 가운데서 비켜나면) 빙글 돈다
+  KWANG_K: 9, KWANG_D: 3,                                // 꽝돌 오뚝이: 맨 아래면 탑 기울기를 되돌리는 힘(알짜 힘 0 → 점선 그대로)
+  MONG_BOOST: 1.2,                                       // 몽이가 스프링 바로 위면 한 번 더 통 (+20%)
+  PUFF_LIFT: 0.85, PUFF_DRAG: 1.6, PUFF_R2: 0.62,        // 부풀 톡 → 빵빵 낙하산: 무리 무게의 85%만큼 위로 · 속도 반대 저항
+  STAND_ANG: 35, LAND_WAIT: 2.5                          // 착지: 기울기 35° 미만으로 구름 위에 얹혀 있으면 "섰다"
+};
+var CAT = { GROUND: 1, PLATE: 2, FRIEND: 4, CLOUD: 8 };
+var DIMS = {
+  mong:  { shape: 'ngon', n: 10, r: 0.46, density: 1.0, friction: 0.8, rest: 0.35, angDamp: 1.5, w8: 1 },
+  puff:  { shape: 'ngon', n: 12, r: 0.40, density: 1.0, friction: 0.8, rest: 0.2, angDamp: 1.0, w8: 0.5 },
+  gil:   { shape: 'capsule', w: 0.62, h: 2.3, rb: 0.07, rt: 0.22, density: 0.8, friction: 0.8, rest: 0.1, angDamp: 0.3, w8: 1 },
+  kwang: { shape: 'rbox', w: 1.3, h: 0.8, r: 0.14, density: 2.5, friction: 0.8, rest: 0.05, angDamp: 0.3, w8: 3 }
+};
+// 판: 땅 받침에서 구름 A·B·C 를 지나 하늘집 지붕까지. y = 윗면 높이(m), 받침은 윗면 위 0.75m 에 떠 있는 꽃방석 스프링.
+var LEVEL = {
+  start: ['kwang', 'puff'], flags: 6,
+  ground: { x: 0, top: 0.1 },
+  clouds: [
+    { x: 1.9, top: 4.8, w: 4.0, wait: 'gil' },
+    { x: -0.6, top: 9.4, w: 3.8, wait: 'mong' },
+    { x: 1.5, top: 13.9, w: 3.6, wait: 'kwang' },
+    { x: -1.2, top: 18.3, w: 4.0, house: true }
+  ]
+};
+
+function ngon(n, r) { var v = []; for (var i = 0; i < n; i++) { var a = -Math.PI / 2 + Math.PI / n + i * 2 * Math.PI / n; v.push({ x: r * Math.cos(a), y: r * Math.sin(a) }); } return v; }
+function polyOf(kind) {
+  var d = DIMS[kind];
+  if (d.shape === 'ngon') return ngon(d.n, d.r);
+  var w = d.w / 2, h = d.h / 2, s = Math.SQRT1_2;
+  if (d.shape === 'capsule') {
+    var rb = d.rb, rt = d.rt;
+    return [{ x: -w + rb, y: -h }, { x: w - rb, y: -h }, { x: w, y: -h + rb }, { x: w, y: h - rt }, { x: w - rt + rt * s, y: h - rt + rt * s }, { x: w - rt, y: h },
+      { x: -w + rt, y: h }, { x: -w + rt - rt * s, y: h - rt + rt * s }, { x: -w, y: h - rt }, { x: -w, y: -h + rb }];
+  }
+  var r = d.r;
+  return [{ x: -w + r, y: -h }, { x: w - r, y: -h }, { x: w, y: -h + r }, { x: w, y: h - r }, { x: w - r, y: h }, { x: -w + r, y: h }, { x: -w, y: h - r }, { x: -w, y: -h + r }];
+}
+var POLY = {}; ['mong', 'puff', 'gil', 'kwang'].forEach(function (k) { POLY[k] = polyOf(k); });
+function halfW(v) { var m = 0; v.forEach(function (p) { m = Math.max(m, Math.abs(p.x)); }); return m; }
+function lowY(v, dx) {
+  var best = null;
+  for (var i = 0; i < v.length; i++) {
+    var a = v[i], b = v[(i + 1) % v.length];
+    if ((a.x - dx) * (b.x - dx) <= 0 && a.x !== b.x) { var y = a.y + (dx - a.x) / (b.x - a.x) * (b.y - a.y); if (best === null || y < best) best = y; }
+  }
+  return best;
+}
+function polyFix(body, verts, o) {
+  return body.createFixture(new PL.Polygon(verts), { density: o.density, friction: o.friction, restitution: o.rest || 0, filterCategoryBits: o.cat, filterMaskBits: o.mask == null ? 0xffff : o.mask });
+}
+/** 단계 i 의 발사 받침 기준점 (0 = 땅, 1.. = 구름 i-1) */
+function anchorOf(level, i) { if (i === 0) return { x: level.ground.x, y: level.ground.top + 0.9 }; var c = level.clouds[i - 1]; return { x: c.x, y: c.top + 0.75 }; }
+
+function mkWorld(level) {
+  level = level || LEVEL;
+  var world = new PL.World({ gravity: { x: 0, y: -PHY.G } });
+  var W = { world: world, level: level, step: 0, t: 0, friends: [], clouds: [], welds: [], events: [], stage: 0, nextId: 100, launch: null, landT: -1, puffTap: false,
+    aim: { on: false, p: 0, theta: 80, want: { x: 0, y: 0 }, off: { x: 0, y: 0 }, vel: { x: 0, y: 0 }, tilt: 0, wantTilt: 0, fast: false, fire: false, hold: 0 } };
+  var ground = world.createBody();
+  ground.createFixture(new PL.Box(60, 1, { x: 0, y: level.ground.top - 1 }, 0), { friction: 0.9, filterCategoryBits: CAT.GROUND });
+  ground.ud = { type: 'ground', idx: 0 }; W.ground = ground;
+  level.clouds.forEach(function (c, i) {
+    var b = world.createBody({ position: { x: c.x, y: c.top } });
+    // 윗면은 평평(높은 마찰·반발 0), 양 끝에 낮은 턱 → 살짝 감싸 줌
+    b.createFixture(new PL.Box(c.w / 2, 0.35, { x: 0, y: -0.35 }, 0), { friction: 1.0, restitution: 0, filterCategoryBits: CAT.CLOUD });
+    [-1, 1].forEach(function (sd) { b.createFixture(new PL.Polygon([{ x: sd * c.w / 2, y: 0 }, { x: sd * (c.w / 2 - 0.35), y: 0 }, { x: sd * c.w / 2, y: 0.12 }].sort(function (p, q) { return p.x - q.x; })), { friction: 1.0, restitution: 0, filterCategoryBits: CAT.CLOUD }); });
+    b.ud = { type: 'cloud', idx: i + 1, top: c.top, w: c.w, house: !!c.house };
+    W.clouds.push(b);
+  });
+  var P = PHY.PLATE, a0 = anchorOf(level, 0);
+  var plate = world.createBody({ type: 'dynamic', position: { x: a0.x, y: a0.y }, gravityScale: 0 });
+  plate.createFixture(new PL.Box(P.hw, P.hh), { density: P.mass / (4 * P.hw * P.hh), friction: 0.9, filterCategoryBits: CAT.PLATE, filterMaskBits: CAT.FRIEND });
+  plate.setSleepingAllowed(false); plate.ud = { type: 'plate' }; W.plate = plate; W.anchor = a0;
+  world.on('pre-solve', function (c) { preSolve(W, c); });
+  for (var s = 0; s < 30; s++) stepW(W);
+  W.events.length = 0;
+  return W;
+}
+function addFriend(W, kind, x, y, id) {
+  var d = DIMS[kind];
+  var b = W.world.createBody({ type: 'dynamic', position: { x: x, y: y }, angularDamping: d.angDamp });
+  polyFix(b, POLY[kind], { density: d.density, friction: d.friction, rest: d.rest, cat: CAT.FRIEND });
+  b.ud = { type: 'friend', kind: kind, id: id == null ? W.nextId++ : id, state: 'stack', fell: false, placeT: W.t };
+  W.friends.push(b); return b;
+}
+function removeFriend(W, b) { W.welds = W.welds.filter(function (j) { if (j.getBodyA() === b || j.getBodyB() === b) { W.world.destroyJoint(j); return false; } return true; }); W.friends = W.friends.filter(function (f) { return f !== b; }); b.ud.dead = true; W.world.destroyBody(b); }
+function stackFriends(W) { return W.friends.filter(function (b) { return b.ud.state === 'stack'; }); }
+
+function rayDown(W, x) {
+  var best = 1, top = W.anchor.y + 30, bot = W.anchor.y - 4;
+  W.world.rayCast({ x: x, y: top }, { x: x, y: bot }, function (fx, pt, n, frac) {
+    var u = fx.getBody().ud;
+    if (u && u.type === 'friend' && u.state !== 'stack') return -1;
+    if (u && u.type === 'cloud' && u.idx > W.stage) return -1;   // 위 구름은 무시 (지금 받침 쪽만)
+    if (frac < best) best = frac;
+    return frac;
+  });
+  return top + (bot - top) * best;
+}
+function landing(W, kind, x) {
+  var v = POLY[kind], hw = halfW(v), best = -1e9;
+  [-0.95, -0.66, -0.33, 0, 0.33, 0.66, 0.95].forEach(function (k) {
+    var dx = k * hw, ly = lowY(v, dx); if (ly === null) return;
+    best = Math.max(best, rayDown(W, x + dx) - ly);
+  });
+  return best + 0.04;
+}
+function canDrop(W, x) { var p = W.plate.getPosition(); return Math.abs(x - p.x) <= PHY.PLATE.hw + 0.3; }
+
+function preSolve(W, c) {
+  var fA = c.getFixtureA(), fB = c.getFixtureB(), a = fA.getBody().ud || {}, b = fB.getBody().ud || {};
+  // 구름은 아래·옆에서는 통과, 위에서 내려앉을 때만 밟힘 (몽글 구름 = 한 방향 발판)
+  if ((a.type === 'cloud' && b.type === 'friend') || (b.type === 'cloud' && a.type === 'friend')) {
+    var cl = a.type === 'cloud' ? a : b, ff = a.type === 'cloud' ? fB : fA, fb = ff.getBody();
+    if (ff.getAABB(0).lowerBound.y < cl.top - 0.12 || fb.getLinearVelocity().y > 0.5) { c.setEnabled(false); return; }
+  }
+  if ((a.type === 'friend' && a.state !== 'fly') || (b.type === 'friend' && b.state !== 'fly')) {
+    var fresh = (a.type === 'friend' && W.t - (a.placeT || -9) < 0.6) || (b.type === 'friend' && W.t - (b.placeT || -9) < 0.6);
+    c.setRestitution(fresh ? 0.1 : 0);
+  }
+  // 날아가는 무리가 목표 구름(또는 그 받침)에 처음 닿음 → 착지 시작
+  if (W.launch && W.landT < 0) {
+    var tgt = W.stage + 1, hitT = (a.type === 'friend' && a.state === 'fly' && (b.type === 'cloud' && b.idx === tgt)) || (b.type === 'friend' && b.state === 'fly' && (a.type === 'cloud' && a.idx === tgt));
+    if (hitT) { W.landT = W.t; W.events.push({ type: 'touch', stage: tgt }); }
+  }
+}
+
+/* ---------------- 받침(스프링) ---------------- */
+function clampMag(x, y, m) { var l = Math.sqrt(x * x + y * y); return l > m ? { x: x / l * m, y: y / l * m } : { x: x, y: y }; }
+function plateControl(W) {
+  var a = W.aim, P = PHY.PLATE, dt = PHY.DT, A = W.anchor;
+  if (a.hold > 0) { a.hold -= dt; if (a.hold <= 0) aimCancel(W, false); }
+  var vmax = a.fast ? 8 : PHY.PULL_V, amax = a.fast ? 200 : PHY.PULL_A;
+  var tv = clampMag((a.want.x - a.off.x) * 12, (a.want.y - a.off.y) * 12, vmax);
+  var dv = clampMag(tv.x - a.vel.x, tv.y - a.vel.y, amax * dt);
+  a.vel.x += dv.x; a.vel.y += dv.y; a.off.x += a.vel.x * dt; a.off.y += a.vel.y * dt;
+  var tr = (a.fast ? 4 : 0.7) * dt;
+  a.tilt += Math.max(-tr, Math.min(tr, a.wantTilt - a.tilt));
+  if (a.fast && Math.abs(a.off.x) + Math.abs(a.off.y) < 0.005 && Math.abs(a.tilt) < 0.002) a.fast = false;
+  var b = W.plate, p = b.getPosition(), v = b.getLinearVelocity(), ang = b.getAngle(), w = b.getAngularVelocity();
+  b.applyForceToCenter({ x: P.kx * (A.x + a.off.x - p.x) - P.cx * v.x, y: P.ky * (A.y + a.off.y - p.y) - P.cy * v.y }, true);
+  b.applyTorque(P.kr * (a.tilt - ang) - P.cr * w, true);
+}
+function aimSet(W, p, theta) {
+  var a = W.aim; p = Math.max(0, Math.min(1, p)); theta = Math.max(PHY.ANG_MIN, Math.min(PHY.ANG_MAX, theta));
+  var th = theta * Math.PI / 180;
+  a.on = true; a.fast = false; a.p = p; a.theta = theta; a.hold = 0;
+  a.want = { x: -PHY.PULL_X * p * Math.cos(th), y: -PHY.PULL_Y * p };
+  a.wantTilt = -(90 - theta) * PHY.TILT * Math.PI / 180 * Math.min(1, p / 0.3);
+}
+function aimCancel(W, fast) { var a = W.aim; a.on = false; a.p = 0; a.want = { x: 0, y: 0 }; a.wantTilt = 0; a.fast = !!fast; a.hold = 0; }
+function aimRelease(W) {
+  if (W.aim.p < PHY.P_MIN || !groupOf(W).length) { aimCancel(W, false); return false; }
+  W.aim.fire = true; return true;
+}
+/** 발사될 무리: 받침에 닿은 친구(= 바닥) + 그 위로 닿은 친구… 바닥 목록도 함께 */
+function groupOf(W) {
+  var out = [], seen = {}, q = [W.plate];
+  out.bottom = [];
+  while (q.length) {
+    var b = q.shift();
+    for (var ce = b.getContactList(); ce; ce = ce.next) {
+      var o = ce.other, u = o && o.ud;
+      if (!u || u.type !== 'friend' || u.state !== 'stack' || seen[u.id] || !ce.contact.isTouching()) continue;
+      seen[u.id] = true;
+      if (touches(o, 'ground') || touches(o, 'cloud')) continue;
+      out.push(o); q.push(o);
+      if (b === W.plate) out.bottom.push(o);
+    }
+  }
+  return out;
+}
+function touches(b, type) { for (var ce = b.getContactList(); ce; ce = ce.next) if (ce.other && ce.other.ud && ce.other.ud.type === type && ce.contact.isTouching() && ce.contact.isEnabled()) return true; return false; }
+function comOf(bodies) {
+  var M = 0, x = 0, y = 0, vx = 0, vy = 0;
+  bodies.forEach(function (b) { var m = b.getMass(), c = b.getWorldCenter(), v = b.getLinearVelocity(); M += m; x += m * c.x; y += m * c.y; vx += m * v.x; vy += m * v.y; });
+  return M ? { M: M, x: x / M, y: y / M, vx: vx / M, vy: vy / M } : null;
+}
+/** 몽이 동사: 스프링 바로 위(바닥)가 전부 몽이면 한 번 더 통 */
+function boostOf(g) { return g.bottom && g.bottom.length && g.bottom.every(function (b) { return b.ud.kind === 'mong'; }) ? PHY.MONG_BOOST : 1; }
+function launchSpeed(M, p, boost) { return PHY.V_MAX * p * Math.sqrt(PHY.M0 / (PHY.M0 + M)) * (boost || 1); }
+function ballistic(x, y, vx, vy, n) { var pts = []; for (var i = 1; i <= n; i++) { vy -= PHY.G * PHY.DT; x += vx * PHY.DT; y += vy * PHY.DT; pts.push({ x: x, y: y }); } return pts; }
+function guideNow(W) {
+  var g = groupOf(W), c = comOf(g); if (!c) return null;
+  var a = W.aim, bo = boostOf(g), s = launchSpeed(c.M, a.p, bo), th = a.theta * Math.PI / 180, vx = s * Math.cos(th), vy = s * Math.sin(th);
+  return { M: c.M, x: c.x, y: c.y, vx: vx, vy: vy, n: g.length, boost: bo, pts: ballistic(c.x, c.y, vx, vy, Math.round(PHY.GUIDE_T1 / PHY.DT)) };
+}
+/** 튕!: 무리 전체가 같은 속도로 + (삐딱하면) 무게중심 둘레로 빙글. 서로 닿은 친구는 용접(부드럽게 붙음) */
+function launchNow(W) {
+  var g = groupOf(W), c = comOf(g), a = W.aim;
+  if (!c) { aimCancel(W, true); return; }
+  var bo = boostOf(g), s = launchSpeed(c.M, a.p, bo), th = a.theta * Math.PI / 180, vx = s * Math.cos(th), vy = s * Math.sin(th);
+  var pp = W.plate.getPosition(), w = -PHY.SPIN * (c.x - pp.x) * s;   // 받침 가운데서 비켜난 만큼 돈다
+  g.forEach(function (b) {
+    var q = b.getWorldCenter(), v = b.getLinearVelocity(), rx = q.x - c.x, ry = q.y - c.y;
+    b.setLinearVelocity({ x: vx + (v.x - c.vx) - w * ry, y: vy + (v.y - c.vy) + w * rx });
+    b.setAngularVelocity(w + b.getAngularVelocity() * 0.5);
+    b.ud.state = 'fly'; b.ud.flyT0 = W.t; b.setAwake(true);
+  });
+  // 용접: 무리 안에서 지금 닿아 있는 쌍
+  var seen = {};
+  g.forEach(function (b) {
+    for (var ce = b.getContactList(); ce; ce = ce.next) {
+      var o = ce.other; if (!o || !o.ud || o.ud.type !== 'friend' || o.ud.state !== 'fly' || !ce.contact.isTouching()) continue;
+      var k = Math.min(b.ud.id, o.ud.id) + ':' + Math.max(b.ud.id, o.ud.id); if (seen[k]) continue; seen[k] = 1;
+      var wm = ce.contact.getWorldManifold(null), an = wm && ce.contact.getManifold().pointCount ? wm.points[0] : b.getWorldCenter();
+      var j = W.world.createJoint(new PL.WeldJoint({ frequencyHz: PHY.WELD_HZ, dampingRatio: PHY.WELD_DAMP }, b, o, an));
+      if (j) W.welds.push(j);
+    }
+  });
+  var bottom = g.bottom.slice().sort(function (p, q) { return q.getMass() - p.getMass(); })[0];
+  W.launch = { t: W.t, step: W.step, p: a.p, theta: a.theta, M: c.M, n: g.length, boost: bo, x: c.x, y: c.y, vx: vx, vy: vy, w: w, group: g, kinds: g.map(function (b) { return b.ud.kind; }),
+    bottom: bottom, kwang: bottom && bottom.ud.kind === 'kwang', guide: ballistic(c.x, c.y, vx, vy, 40), track: [], maxTilt: 0 };
+  W.landT = -1; W.puffTap = false;
+  W.events.push({ type: 'launch', M: c.M, n: g.length, p: a.p, theta: a.theta, x: c.x, y: c.y, vx: vx, vy: vy, boost: bo, welds: W.welds.length });
+  a.on = false; a.want = { x: a.off.x, y: a.off.y }; a.wantTilt = a.tilt; a.vel = { x: 0, y: 0 }; a.hold = PHY.HOLD_T;
+}
+/** 비행 중 친구 동사: 꽝돌 오뚝이(토크만), 부풀 낙하산(톡 했을 때) */
+function verbs(W) {
+  var L = W.launch; if (!L) return;
+  var fly = L.group.filter(function (b) { return !b.ud.dead && b.ud.state === 'fly'; }); if (!fly.length) return;
+  // 꽝돌 오뚝이: 맨 아래가 꽝돌이고 아직 착지 전이면, 그 꽝돌 기울기를 0 으로 되돌리는 토크 (무리 관성 기준)
+  if (L.kwang && !L.bottom.ud.dead && W.landT < 0) {
+    var kb = L.bottom, ang = Math.atan2(Math.sin(kb.getAngle()), Math.cos(kb.getAngle())), c = comOf(fly), I = 0;
+    fly.forEach(function (b) { var q = b.getWorldCenter(); I += b.getInertia() + b.getMass() * ((q.x - c.x) * (q.x - c.x) + (q.y - c.y) * (q.y - c.y)); });
+    var tau = -(PHY.KWANG_K * ang + PHY.KWANG_D * kb.getAngularVelocity()) * I;
+    // 무리 전체에 나눠 줌(알짜 힘 0, 토크만) → 무게중심 길은 점선 그대로
+    fly.forEach(function (b) { var q = b.getWorldCenter(), sh = (b.getInertia() + b.getMass() * ((q.x - c.x) * (q.x - c.x) + (q.y - c.y) * (q.y - c.y))) / I; b.applyTorque(tau * sh, true); });
+    L.righting = Math.abs(ang) > 0.05;
+  }
+  // 부풀 낙하산: 톡 하면 빵빵(몸이 커짐) → 무리 무게의 일부만큼 위로 + 속도 반대 저항
+  if (W.puffTap) {
+    W.puffTap = false;
+    fly.forEach(function (b) {
+      if (b.ud.kind !== 'puff' || b.ud.puffed) return;
+      b.ud.puffed = true;
+      var f = b.getFixtureList(), m = b.getMass(), r2 = PHY.PUFF_R2, dens = m / (0.5 * 12 * r2 * r2 * Math.sin(2 * Math.PI / 12));
+      b.destroyFixture(f); polyFix(b, ngon(12, r2), { density: dens, friction: 0.8, rest: 0.2, cat: CAT.FRIEND });
+      W.events.push({ type: 'puff', id: b.ud.id });
+    });
+  }
+  fly.forEach(function (b) {
+    if (b.ud.kind !== 'puff' || !b.ud.puffed || W.landT >= 0) return;
+    var conn = connected(W, b).filter(function (o) { return o.ud.state === 'fly'; }), c = comOf(conn), q = b.getWorldCenter();
+    b.applyForce({ x: -PHY.PUFF_DRAG * c.M * c.vx * 0.5, y: PHY.PUFF_LIFT * c.M * PHY.G - PHY.PUFF_DRAG * c.M * c.vy }, q, true);
+  });
+}
+/** 용접으로 이어진 무리 */
+function connected(W, b) {
+  var out = [b], seen = {}; seen[b.ud.id] = 1;
+  for (var i = 0; i < out.length; i++) W.welds.forEach(function (j) { var A = j.getBodyA(), B = j.getBodyB(), o = A === out[i] ? B : B === out[i] ? A : null; if (o && !seen[o.ud.id]) { seen[o.ud.id] = 1; out.push(o); } });
+  return out;
+}
+/** 세게 부딪쳐 용접이 버티는 힘을 넘으면 끊어짐 (와르르) */
+function weldBreaks(W) {
+  var inv = 1 / PHY.DT;
+  W.welds = W.welds.filter(function (j) {
+    var f = j.getReactionForce(inv), t = j.getReactionTorque(inv), F = Math.sqrt(f.x * f.x + f.y * f.y) + Math.abs(t) * 2;
+    if (F > PHY.WELD_BREAK * (j.getBodyA().getMass() + j.getBodyB().getMass())) { var p = j.getAnchorA(); W.events.push({ type: 'snap', x: p.x, y: p.y }); W.world.destroyJoint(j); return false; }
+    return true;
+  });
+}
+function unweld(W) { W.welds.forEach(function (j) { W.world.destroyJoint(j); }); W.welds = []; }
+
+/* ---------------- 한 step ---------------- */
+function stepW(W) {
+  if (W.aim.fire) { W.aim.fire = false; launchNow(W); }
+  plateControl(W);
+  verbs(W);
+  for (var b = W.world.getBodyList(); b; b = b.getNext()) { var p = b.getPosition(), v = b.getLinearVelocity(); b._px = p.x; b._py = p.y; b._pa = b.getAngle(); b._vx = v.x; b._vy = v.y; }
+  W.world.step(PHY.DT, PHY.VI, PHY.PI);
+  W.step++; W.t = W.step * PHY.DT;
+  weldBreaks(W);
+  // 쌓다가 받침 밖으로 떨어진 친구
+  var pp = W.plate.getPosition();
+  W.friends.forEach(function (b) {
+    var u = b.ud; if (u.state !== 'stack') return;
+    var c = b.getWorldCenter();
+    if (c.y < pp.y - 0.15 || Math.abs(c.x - pp.x) > PHY.PLATE.hw + 1.4 || touches(b, 'ground') || touches(b, 'cloud')) { u.state = 'fell'; u.fell = true; W.events.push({ type: 'fall', body: b, x: c.x, y: c.y }); }
+  });
+  W.friends.forEach(function (b) { var c = b.getWorldCenter(); if (b.ud.state === 'fly' && (c.y < W.anchor.y - 12 || Math.abs(c.x) > 30)) b.ud.gone = true; });
+  if (W.launch) {
+    var L = W.launch, live = L.group.filter(function (b) { return !b.ud.dead; });
+    if (L.track.length < 40) { var cc = comOf(live); if (cc) L.track.push({ x: cc.x, y: cc.y }); }
+    if (W.landT < 0 && L.bottom && !L.bottom.ud.dead) L.maxTilt = Math.max(L.maxTilt, Math.abs(Math.atan2(Math.sin(L.bottom.getAngle()), Math.cos(L.bottom.getAngle()))));
+  }
+}
+function quiet(W) {
+  for (var b = W.world.getBodyList(); b; b = b.getNext()) {
+    var u = b.ud; if (!u || !b.isDynamic() || !b.isAwake() || u.type === 'plate' || u.gone) continue;
+    var v = b.getLinearVelocity();
+    if (Math.abs(v.x) + Math.abs(v.y) > PHY.QUIET_V || Math.abs(b.getAngularVelocity()) > PHY.QUIET_W) return false;
+  }
+  return true;
+}
+/** 지금 목표 구름 위에 "선" 친구들: 그 구름에 직접 또는 친구를 거쳐 얹혀 있고, 기울기 35° 미만, 윗면보다 위 */
+function standing(W) {
+  var tgt = W.clouds[W.stage], out = [], seen = {}, q = [tgt];
+  if (!tgt) return out;
+  var top = tgt.ud.top;
+  while (q.length) {
+    var b = q.shift(), next = [];
+    for (var ce = b.getContactList(); ce; ce = ce.next) if (ce.contact.isTouching() && ce.contact.isEnabled()) next.push(ce.other);
+    if (b.ud.type === 'friend') W.welds.forEach(function (j) { if (j.getBodyA() === b) next.push(j.getBodyB()); else if (j.getBodyB() === b) next.push(j.getBodyA()); });   // 용접된 친구끼리는 접촉이 꺼져 있어 따로 이음
+    for (var k = 0; k < next.length; k++) {
+      var o = next[k], u = o && o.ud;
+      if (!u || u.type !== 'friend' || u.state !== 'fly' || u.dead || seen[u.id]) continue;
+      seen[u.id] = 1;
+      var c = o.getWorldCenter(), a = Math.abs(Math.atan2(Math.sin(o.getAngle()), Math.cos(o.getAngle()))) * 180 / Math.PI;
+      if (c.y < top) continue;
+      q.push(o);
+      // 둥근 친구(몽이·부풀)는 어떻게 굴러 있어도 섬, 꽝돌·길쭉은 똑바로(거꾸로 포함) ±35° 안
+      if (DIMS[u.kind].shape === 'ngon' || a < PHY.STAND_ANG || a > 180 - PHY.STAND_ANG) out.push(o);
+    }
+  }
+  return out;
+}
+/** 차례 끝: 목표 구름에 선 친구가 1명 이상이면 성공 → 다음 단계(받침이 그 구름의 꽃방석으로). 나머지는 어질.
+ *  성공하면 함께 선 친구만 다음 구름으로 간다. 받침에 남았던(안 날린) 친구·떨어진 친구는 아래에 남는다(데려가기 실패).
+ *  실패하면 날린 친구는 어질 → 같은 자리에서 다시.
+ *  { ok, stage, stood: [{id,kind,x,y}], fell: [id], back: [id], center } */
+function endTurn(W) {
+  var tgt = W.clouds[W.stage], st = tgt ? standing(W) : [], ok = st.length > 0, res = { ok: ok, stage: W.stage + 1, stood: [], fell: [], back: [], center: null };
+  unweld(W);
+  if (ok) {
+    var cx = 0; st.forEach(function (b) { cx += b.getPosition().x; }); cx /= st.length;
+    res.center = Math.abs(cx - W.level.clouds[W.stage].x);
+  }
+  var stoodIds = {}; st.forEach(function (b) { stoodIds[b.ud.id] = 1; });
+  W.friends.slice().forEach(function (b) {
+    var u = b.ud;
+    if (u.state === 'fly' || u.state === 'fell') {
+      var p = b.getPosition();
+      if (stoodIds[u.id]) res.stood.push({ id: u.id, kind: u.kind, x: p.x, y: p.y, a: b.getAngle() }); else res.fell.push(u.id);
+      removeFriend(W, b);
+    }
+  });
+  // 성공해도 받침에 남아 있던(안 날아간) 친구는 다음 구름으로 못 감 → 트레이로
+  if (ok) {
+    stackFriends(W).forEach(function (b) { res.back.push(b.ud.id); removeFriend(W, b); });
+    W.stage++;
+    var A = anchorOf(W.level, W.stage); W.anchor = A;
+    W.plate.setTransform({ x: A.x, y: A.y }, 0); W.plate.setLinearVelocity({ x: 0, y: 0 }); W.plate.setAngularVelocity(0);
+    aimCancel(W, false); W.aim.off = { x: 0, y: 0 }; W.aim.vel = { x: 0, y: 0 }; W.aim.tilt = 0;
+  }
+  W.launch = null; W.landT = -1;
+  return res;
+}
+/*WORLD-END*/
+</script>
+<script>
+(function () {
+  'use strict';
+  var cv = document.getElementById('cv'), ctx = cv.getContext('2d'), stage = document.getElementById('stage');
+  if (!window.planck || typeof mkWorld !== 'function') { document.getElementById('err').style.display = 'grid'; return; }
+
+  /* ---------------- 그림용 정보 ---------------- */
+  var LOOK = {
+    mong:  { col: '#ff9a3c', dark: '#c8631a', hi: '#ffc48a', name: '몽이' },
+    gil:   { col: '#8fd14f', dark: '#4f9a24', hi: '#c5f08f', name: '길쭉' },
+    kwang: { col: '#a3acb6', dark: '#5e6873', hi: '#d4dae0', name: '꽝돌' },
+    puff:  { col: '#ff5d5d', dark: '#c8302f', hi: '#ffd0c8', name: '부풀' }
+  };
+  var TRAY_H = 150, PULL_FULL = 130, BEST_KEY = 'mongle.cloud.best';
+  var OL = '#3b2a22';
+
+  /* ---------------- 레이아웃 (논리 px: 세로 390 기준) ---------------- */
+  var s = 1, dpr = 1, Wl = 390, Hl = 700, trayTop = 550, groundSY = 516;
+  function resize() {
+    var r = stage.getBoundingClientRect();
+    if (r.width < 10 || r.height < 10) return;
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    s = Math.min(r.width / 390, r.height / 700);
+    Wl = r.width / s; Hl = r.height / s; trayTop = Hl - TRAY_H; groundSY = trayTop - 34;
+    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  }
+  /* ---------------- 카메라 (월드 m → 화면 px) · 세로로 올라가는 등반 ---------------- */
+  var cam = { x: 0.6, y: -1, ppm: 66, kx: 0, ky: 0 };
+  function sx(x) { return Wl / 2 + (x - cam.x) * cam.ppm + cam.kx; }
+  function sy(y) { return groundSY - (y - cam.y) * cam.ppm + cam.ky; }
+  function toWorld(px, py) { return { x: cam.x + (px - cam.kx - Wl / 2) / cam.ppm, y: cam.y + (groundSY + cam.ky - py) / cam.ppm }; }
+  function nextCloud() { return G.W.level.clouds[G.W.stage]; }
+  /** 발사대가 선 바닥 높이 (땅 또는 지금 구름 윗면) */
+  function baseY() { var st = G.W.stage; return st === 0 ? G.W.level.ground.top : G.W.level.clouds[st - 1].top; }
+  function buildView() {
+    var A = G.W.anchor, C = nextCloud(), ppm = 64, y = baseY() - 1.1, top = stackTop();
+    if (top + 0.8 > y + (groundSY - 50) / ppm) y = top + 0.8 - (groundSY - 50) / ppm;
+    return { ppm: ppm, x: C ? A.x * 0.65 + C.x * 0.35 : A.x, y: y };
+  }
+  /** 조준: 발사대와 목표 구름이 함께 보이게 */
+  function aimView() {
+    var A = G.W.anchor, C = nextCloud(); if (!C) return buildView();
+    var x0 = Math.min(A.x, C.x - C.w / 2) - 1.6, x1 = Math.max(A.x, C.x + C.w / 2) + 1.6, y0 = baseY() - 0.9, y1 = C.top + 3.0;
+    var ppm = Math.min(Wl / (x1 - x0), (groundSY - 30) / (y1 - y0));
+    return { ppm: ppm, x: (x0 + x1) / 2, y: y0 };
+  }
+  function camGoal() {
+    var L = G.W.level;
+    if (G.state === 'intro') { if (G.introT < G.introHold) { var H = L.clouds[L.clouds.length - 1]; return { ppm: 44, x: H.x, y: H.top - 4 }; } return buildView(); }
+    if (G.state === 'win') { var H2 = L.clouds[L.clouds.length - 1]; return { ppm: 60, x: H2.x, y: H2.top - 2.5 }; }
+    if (G.aiming) return aimView();
+    if (G.state === 'fly') { var a = aimView(); return { ppm: Math.max(40, a.ppm * 0.95), x: a.x * 0.6 + G.follow.x * 0.4, y: Math.min(G.follow.y - 3, Math.max(a.y, G.follow.y - (groundSY - 120) / Math.max(40, a.ppm * 0.95))) }; }
+    return buildView();
+  }
+  function camUpdate(dt) {
+    var g = camGoal(), k = 1 - Math.exp(-dt * (G.state === 'fly' ? 5 : G.state === 'intro' ? 2.6 : 4));
+    cam.x += (g.x - cam.x) * k; cam.y += (g.y - cam.y) * k; cam.ppm += (g.ppm - cam.ppm) * k;
+    var dk = Math.exp(-dt * 14); cam.kx *= dk; cam.ky *= dk;
+  }
+
+  /* ---------------- 상태 ---------------- */
+  var G = null, firstRun = true, nextTrayId = 50;
+  function loadBest() { try { return JSON.parse(localStorage.getItem(BEST_KEY) || 'null'); } catch (e) { return null; } }
+  function saveBest(b) { try { localStorage.setItem(BEST_KEY, JSON.stringify(b)); } catch (e) { /* 무시 */ } }
+  var loseTimer = 0;
+  function newGame() {
+    clearTimeout(loseTimer);
+    var W = mkWorld(LEVEL);
+    G = {
+      W: W, state: 'intro', introT: 0, introHold: firstRun ? 1.4 : 0.3, flags: LEVEL.flags, score: 0, t: 0, acc: 0, alpha: 1,
+      tray: LEVEL.start.map(function (k, i) { return { id: i, kind: k, status: 'ready', bob: i * 0.7, sq: 0 }; }),
+      total: LEVEL.start.length + LEVEL.clouds.filter(function (c) { return c.wait; }).length, left: [], joined: {},
+      drag: null, aiming: false, p: 0, theta: 80, tickN: 0, maxed: false,
+      fx: [], pops: [], freeze: 0, shake: 0, slow: 1, slowT: 0, follow: { x: 0, y: 0 }, flyT: 0, quietT: 0, trail: [], lastTrail: [], trailT: 0,
+      tut: { step: firstRun ? 1 : 0, idle: 0, tapShown: false }, idle: 0, oops: null, lastLaunch: null, result: null, photo: null, squash: {},
+      best: loadBest(), sndT: {}, tickPulse: 0, dragVx: 0, won: false
+    };
+    var H = LEVEL.clouds[LEVEL.clouds.length - 1]; cam.x = H.x; cam.y = H.top - 4; cam.ppm = 44;
+    hideOver(); hud();
+  }
+  function trayItem(id) { for (var i = 0; i < G.tray.length; i++) if (G.tray[i].id === id) return G.tray[i]; return null; }
+  function available() { return G.tray.filter(function (t) { return t.status !== 'flying'; }).length; }
+  function stackTop() { var top = G ? G.W.anchor.y : 0; if (!G) return 0; stackFriends(G.W).forEach(function (b) { var c = b.getPosition(); top = Math.max(top, c.y + boundR(b.ud.kind)); }); return top; }
+  var BR = {}; function boundR(kind) { if (!BR[kind]) { var m = 0; POLY[kind].forEach(function (p) { m = Math.max(m, Math.hypot(p.x, p.y)); }); BR[kind] = m; } return BR[kind]; }
+
+  /* ---------------- 소리·진동 ---------------- */
+  var AC = null;
+  function audio() {
+    try {
+      if (!AC) { AC = new (window.AudioContext || window.webkitAudioContext)(); var b = AC.createBuffer(1, 1, 22050), src = AC.createBufferSource(); src.buffer = b; src.connect(AC.destination); src.start(0); }
+      if (AC.state !== 'running') AC.resume();
+    } catch (e) { AC = null; }
+  }
+  ['pointerup', 'touchend', 'click'].forEach(function (t) { document.addEventListener(t, audio, { passive: true }); });
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  function tone(type, f0, f1, dur, vol, delay) {
+    if (!AC) return;
+    try {
+      var t = AC.currentTime + (delay || 0), o = AC.createOscillator(), g = AC.createGain();
+      o.type = type; o.frequency.setValueAtTime(f0, t); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(AC.destination); o.start(t); o.stop(t + dur + 0.02);
+    } catch (e) { /* 무시 */ }
+  }
+  function noise(dur, vol, freq, type) {
+    if (!AC) return;
+    try {
+      var n = Math.floor(AC.sampleRate * dur), b = AC.createBuffer(1, n, AC.sampleRate), d = b.getChannelData(0);
+      for (var i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2);
+      var src = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
+      src.buffer = b; f.type = type || 'lowpass'; f.frequency.value = freq || 900; g.gain.value = vol;
+      src.connect(f); f.connect(g); g.connect(AC.destination); src.start();
+    } catch (e) { /* 무시 */ }
+  }
+  function once(key, gap) { var t = G.t; if (t - (G.sndT[key] || -9) < gap) return false; G.sndT[key] = t; return true; }
+  var SND = {
+    pick: function () { tone('sine', 440, 660, 0.08, 0.15); },
+    drop: function (n, heavy) { var f = [523, 587, 659, 698, 784, 880, 988][Math.min(6, n)]; tone('sine', f, 0, 0.14, 0.22); tone('triangle', f * 2, 0, 0.08, 0.05); if (heavy) { tone('sine', 140, 70, 0.18, 0.35); noise(0.08, 0.12, 400); } },
+    back: function () { tone('sine', 660, 330, 0.12, 0.15); },
+    tick: function (p) { tone('square', 160 + p * 500, 120 + p * 380, 0.03, 0.05 + p * 0.04); },
+    creak: function (p) { tone('sawtooth', 120 + p * 300, 100 + p * 260, 0.16, 0.025 + p * 0.03); },
+    maxed: function () { tone('sawtooth', 380, 420, 0.25, 0.05); noise(0.2, 0.06, 2600, 'bandpass'); },
+    boing: function (p) { tone('sine', 220, 880, 0.1, 0.45); tone('triangle', 1760, 1500, 0.05, 0.12, 0.05); noise(0.12, 0.1 + p * 0.15, 1200); tone('sine', 300, 160, 0.3, 0.15, 0.04); },
+    puk: function () { tone('sine', 300, 180, 0.12, 0.18); noise(0.06, 0.06, 700); },
+    oops: function () { tone('triangle', 520, 300, 0.22, 0.18); tone('triangle', 390, 220, 0.22, 0.12, 0.12); },
+    thud: function (j) { tone('sine', 120 + j * 6, 45, 0.24, Math.min(0.6, 0.15 + j * 0.03)); noise(0.12, Math.min(0.3, 0.08 + j * 0.02), 520); },
+    crack: function (stone) { noise(0.12, 0.35, stone ? 2400 : 1500, 'bandpass'); tone('square', stone ? 220 : 160, 80, 0.07, 0.1); },
+    chip: function (stone) { tone('triangle', stone ? 1400 : 900, stone ? 1100 : 600, 0.08, 0.14); noise(0.06, 0.2, stone ? 3000 : 1800, 'bandpass'); },
+    dent: function () { tone('square', 520, 480, 0.18, 0.08); tone('triangle', 1040, 980, 0.12, 0.06); },
+    kung: function (n) { tone('sine', 150 - n * 15, 50, 0.3, 0.5); noise(0.15, 0.25, 600); tone('triangle', 400 + n * 120, 0, 0.12, 0.1); },
+    clang: function () { [700, 943, 1210, 1580].forEach(function (f, i) { tone('square', f, f * 0.98, 0.45 - i * 0.06, 0.05); }); },
+    boom: function () { noise(0.5, 0.6, 700); tone('sine', 90, 30, 0.6, 0.8); },
+    pop: function () { tone('sine', 500, 1300, 0.09, 0.2); },
+    ko: function () { tone('sine', 220, 60, 0.9, 0.6); noise(0.4, 0.4, 900); [784, 988, 1175, 1568].forEach(function (f, i) { tone('triangle', f, 0, 0.25, 0.16, 0.5 + i * 0.1); }); },
+    star: function (i) { tone('triangle', [1046, 1318, 1568][i], 0, 0.3, 0.22); tone('sine', [2093, 2637, 3136][i], 0, 0.15, 0.06); },
+    lose: function () { [392, 330, 262].forEach(function (f, i) { tone('triangle', f, 0, 0.3, 0.16, i * 0.15); }); },
+    poff: function () { noise(0.18, 0.25, 700); tone('sine', 200, 120, 0.2, 0.3); },
+    snap: function () { tone('square', 1200, 900, 0.04, 0.08); },
+    inflate: function () { tone('sine', 300, 900, 0.25, 0.25); noise(0.25, 0.12, 2500, 'bandpass'); },
+    chak: function (i) { var f = [523, 659, 784, 1046, 1318][Math.min(4, i)]; tone('triangle', f, 0, 0.18, 0.25); tone('sine', f * 2, 0, 0.1, 0.06); },
+    shutter: function () { noise(0.05, 0.3, 4000, 'highpass'); tone('square', 1800, 1200, 0.03, 0.06, 0.05); },
+    bye: function () { tone('sine', 880, 1175, 0.1, 0.08); tone('sine', 1175, 1568, 0.1, 0.06, 0.08); }
+  };
+  function buzz(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* 무시 */ } }
+
+  /* ---------------- 트레이 (아래 풀 언덕) ---------------- */
+  function slotPos(i) { var row = i < 5 ? 0 : 1, k = i % 5, sw = (Wl - 24) / 5; return { x: 12 + (k + 0.5) * sw, y: trayTop + (row ? 128 : 66), w: sw }; }
+  function trayScale(kind) { var d = DIMS[kind], w = d.shape === 'ngon' ? d.r * 2 : d.w, h = d.shape === 'ngon' ? d.r * 2 : d.h; var sw = (Wl - 24) / 5; return Math.min(46, (sw - 14) / w, 52 / h); }
+  function trayHit(px, py) {
+    var best = null, bd = 1e9;
+    G.tray.forEach(function (t, i) {
+      if (t.status !== 'ready') return;
+      var p = slotPos(i), dx = px - p.x, dy = py - (p.y - 24), d = dx * dx + dy * dy;
+      if (Math.abs(dx) < p.w / 2 && Math.abs(dy) < 34 && d < bd) { bd = d; best = t; }
+    });
+    return best;
+  }
+
+  /* ---------------- 입력 ---------------- */
+  function toL(e) { var r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s }; }
+  var ptr = null;
+  /** 탑 맨 위 친구(위에 아무도 안 얹힌)를 톡 → 트레이로 */
+  function topFriendAt(p) {
+    var w = toWorld(p.x, p.y), hit = null;
+    stackFriends(G.W).forEach(function (b) {
+      for (var f = b.getFixtureList(); f; f = f.getNext()) if (f.testPoint(w)) hit = b;
+      if (!hit) { var c = b.getPosition(); if (Math.hypot(c.x - w.x, c.y - w.y) < boundR(b.ud.kind) + 0.12) hit = hit || b; }
+    });
+    if (!hit) return null;
+    for (var ce = hit.getContactList(); ce; ce = ce.next) { var o = ce.other; if (o && o.ud && o.ud.type === 'friend' && o.ud.state === 'stack' && ce.contact.isTouching() && o.getPosition().y > hit.getPosition().y + 0.15) return null; }
+    return hit;
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    audio();
+    if (ptr !== null || !G) return;
+    var p = toL(e);
+    if (G.state === 'intro') { G.introT = Math.max(G.introT, G.introHold); return; }
+    if (G.state === 'fly') { if (G.hasPuff && G.flyT > 0.1) G.W.puffTap = true; return; }   // 부풀 동사: 날 때 톡 → 빵빵 낙하산
+    if (G.state !== 'build' || G.won) return;
+    ptr = e.pointerId; try { cv.setPointerCapture(e.pointerId); } catch (er) { /* 무시 */ }
+    G.idle = 0;
+    if (p.y >= trayTop - 10) {
+      var t = trayHit(p.x, p.y);
+      if (t) { t.status = 'drag'; G.drag = { type: 'friend', t: t, x: p.x, y: p.y, x0: p.x, y0: p.y, hist: [{ x: p.x, y: p.y, t: G.t }] }; G.dragVx = 0; SND.pick(); buzz(10); }
+      else { G.drag = { type: 'none' }; G.trayWiggle = 0.4; }
+      return;
+    }
+    var top = topFriendAt(p);
+    G.drag = { type: 'pull', x0: p.x, y0: p.y, x: p.x, y: p.y, tap: top, moved: false, hist: [{ x: p.x, y: p.y, t: performance.now() }] };
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (e.pointerId !== ptr || !G || !G.drag) return;
+    var p = toL(e), d = G.drag;
+    if (d.type === 'friend') { G.dragVx = G.dragVx * 0.7 + (p.x - d.x) * 0.3; d.x = p.x; d.y = p.y; d.hist.push({ x: p.x, y: p.y, t: G.t }); while (d.hist.length > 2 && G.t - d.hist[0].t > 0.1) d.hist.shift(); return; }
+    if (d.type !== 'pull') return;
+    d.x = p.x; d.y = p.y; d.hist.push({ x: p.x, y: p.y, t: performance.now() }); while (d.hist.length > 2 && performance.now() - d.hist[0].t > 200) d.hist.shift();
+    if (!d.moved && Math.hypot(p.x - d.x0, p.y - d.y0) > 10) { d.moved = true; if (!groupOf(G.W).length) { d.type = 'none'; G.trayWiggle = 0.5; return; } G.aiming = true; }
+    if (d.moved) aimFromDrag();
+  });
+  function aimFromDrag(d) {
+    d = d || G.drag;
+    var lx = d.x0 - d.x, ly = d.y0 - d.y, len = Math.hypot(lx, ly);
+    var th = Math.atan2(-ly, lx) * 180 / Math.PI;   // 손가락을 아래로 당기면 위로 (오른쪽 위 35° ~ 왼쪽 위 145°)
+    if (th < 0) th = th < -90 ? PHY.ANG_MAX : PHY.ANG_MIN;
+    th = Math.max(PHY.ANG_MIN, Math.min(PHY.ANG_MAX, th));
+    var p = Math.min(1, len / PULL_FULL);
+    G.p = p; G.theta = th;
+    aimSet(G.W, p, th);
+    var n = Math.floor(p / 0.08);
+    if (n > G.tickN) { SND.tick(p); buzz(12); if (once('creak', 0.12)) SND.creak(p); G.tickPulse = 1; }
+    G.tickN = n;
+    if (p >= 0.95 && !G.maxed) { G.maxed = true; SND.maxed(); buzz(15); } else if (p < 0.9) G.maxed = false;
+  }
+  function dropX(d) { var hx = 0, n = 0; d.hist.forEach(function (h) { if (G.t - h.t <= 0.1) { hx += h.x; n++; } }); return n ? hx / n : d.x; }
+  function endPtr(e, cancel) {
+    if (e.pointerId !== ptr) return;
+    ptr = null;
+    var d = G && G.drag; if (!d) return;
+    G.drag = null;
+    if (d.type === 'friend') {
+      var t = d.t, w = toWorld(dropX(d), d.y - 70), lifted = d.y0 - d.y > 30 || Math.abs(d.x - d.x0) > 30;   // 톡만 하면 놓지 않음
+      if (!cancel && lifted && G.state === 'build' && !G.won && canDrop(G.W, w.x)) {
+        var y = landing(G.W, t.kind, w.x);
+        var nb = addFriend(G.W, t.kind, w.x, y, t.id); t.status = 'stack'; nb.ud.sq = 0.55;
+        var lo = 1e9; POLY[t.kind].forEach(function (q) { lo = Math.min(lo, q.y); }); dust(w.x, y + lo, 4);
+        SND.drop(stackFriends(G.W).length - 1, t.kind === 'kwang'); buzz(t.kind === 'kwang' ? 25 : 14);
+        G.tut.placed = true; G.tut.idle = 0;
+      } else { t.status = 'return'; t.from = { x: d.x, y: d.y - 70, sc: cam.ppm }; t.k = 0; SND.back(); }
+      return;
+    }
+    if (d.type === 'pull') {
+      if (!d.moved) {
+        if (d.tap && !cancel && !d.tap.ud.dead && d.tap.ud.state === 'stack') {   // 맨 위 친구 톡 → 트레이로
+          var b = d.tap, t2 = trayItem(b.ud.id), c = b.getPosition();
+          removeFriend(G.W, b); t2.status = 'return'; t2.from = { x: sx(c.x), y: sy(c.y), sc: cam.ppm }; t2.k = 0; SND.back();
+        }
+        return;
+      }
+      var old = null, now = performance.now(); d.hist.forEach(function (h) { if (now - h.t >= 70) old = h; });
+      if (old && !cancel) { d.x = old.x; d.y = old.y; aimFromDrag(d); }
+      G.aiming = false;
+      if (cancel || !aimRelease(G.W)) { aimCancel(G.W, false); SND.puk(); G.p = 0; G.tickN = 0; return; }
+      G.tut.pulled = true; if (G.tut.step === 2) G.tut.step = 0;
+    }
+  }
+  cv.addEventListener('pointerup', function (e) { endPtr(e, false); });
+  cv.addEventListener('pointercancel', function (e) { endPtr(e, true); });
+
+  /* ---------------- 효과 (월드 좌표, m) ---------------- */
+  var RND = Math.random;
+  function debris(x, y, m, w, h) {
+    var col = m === 'S' ? ['#9aa3ad', '#7d8792', '#c3cad1'] : ['#c98a4b', '#a96e35', '#e0a868'];
+    for (var i = 0; i < 12; i++) G.fx.push({ type: 'chip', x: x + (RND() - 0.5) * w * 0.8, y: y + (RND() - 0.5) * h * 0.8, vx: (RND() - 0.3) * 6, vy: 2 + RND() * 6, r: RND() * 6, vr: (RND() - 0.5) * 20, w: 6 + RND() * 10, h: 5 + RND() * 8, c: col[i % 3], t: 0, life: 1.1 + RND() * 0.5 });
+  }
+  function chips(x, y, m) {
+    var col = m === 'S' ? ['#9aa3ad', '#c3cad1'] : ['#c98a4b', '#e0a868'];
+    for (var i = 0; i < 6; i++) G.fx.push({ type: 'chip', x: x + (RND() - 0.5) * 0.6, y: y + (RND() - 0.2) * 0.5, vx: (RND() - 0.5) * 4, vy: 2 + RND() * 3, r: RND() * 6, vr: (RND() - 0.5) * 20, w: 4 + RND() * 5, h: 3 + RND() * 4, c: col[i % 2], t: 0, life: 0.8 });
+  }
+  function dust(x, y, n) { for (var i = 0; i < (n || 6); i++) G.fx.push({ type: 'dust', x: x + (RND() - 0.5) * 0.8, y: y + 0.1, vx: (RND() - 0.5) * 1.6, vy: 0.3 + RND() * 0.8, t: 0, life: 0.6 + RND() * 0.3, s: 8 + RND() * 10 }); }
+  function sparks(x, y, c, n) { for (var i = 0; i < n; i++) { var a = RND() * Math.PI * 2, v = 3 + RND() * 5; G.fx.push({ type: 'spark', x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v + 1, c: c, t: 0, life: 0.35 + RND() * 0.2 }); } }
+  function ring(x, y, r, c) { G.fx.push({ type: 'ring', x: x, y: y, r: r, c: c, t: 0, life: 0.45 }); }
+  function popup(text, x, y, size, color) { G.pops.push({ text: text, x: x, y: y, size: size, color: color, t: 0, life: 1.1 }); }
+  function addScore(n) { G.score += n; hud(); }
+
+  /* ---------------- 물리 사건 → 연출 ---------------- */
+  function onEvents() {
+    var ev = G.W.events; if (!ev.length) return;
+    G.W.events = [];
+    ev.forEach(function (e) {
+      if (e.type === 'launch') {
+        SND.boing(e.p); buzz([20, 30, 40]); G.freeze = 50; cam.kx -= 6 * Math.cos(e.theta * Math.PI / 180); cam.ky += 6 * Math.sin(e.theta * Math.PI / 180);
+        G.state = 'fly'; G.flyT = 0; G.quietT = 0; G.flags--; hud(); G.trail = []; G.trailT = 0; G.follow = { x: e.x, y: e.y };
+        G.kick = 0.18; G.lastLaunch = G.W.launch; G.ghostGuide = { pts: ballistic(e.x, e.y, e.vx, e.vy, Math.round(PHY.GUIDE_T1 / PHY.DT)), t: 0 };
+        G.W.launch.group.forEach(function (b) { b.ud.str = 1; var t = trayItem(b.ud.id); if (t) t.status = 'flying'; });
+        if (e.boost > 1) { var pl = G.W.plate.getPosition(); popup('통!', pl.x - 0.9, pl.y, 26, '#ff9a3c'); SND.boing(1); }   // 몽이 동사: 한 번 더 통
+        G.hasPuff = G.W.launch.group.some(function (b) { return b.ud.kind === 'puff'; });
+        G.p = 0; G.tickN = 0;
+      } else if (e.type === 'fall') {
+        var t = trayItem(e.body.ud.id); if (t) { t.status = 'falling'; t.fallT = 0; t.body = e.body; }
+        G.oops = { x: e.x, y: e.y, t: 0 }; SND.oops(); buzz(30);
+        if (G.aiming || (G.drag && G.drag.type === 'pull')) { aimCancel(G.W, false); G.aiming = false; G.drag = null; ptr = null; G.slow = 0.3; G.slowT = 0.5; G.p = 0; G.tickN = 0; }
+      } else if (e.type === 'friendHit') {
+        var b = e.body; b.ud.sq = Math.max(b.ud.sq || 0, Math.min(0.8, e.J / (b.getMass() * 3))); if (b.ud.state === 'fly' && e.J > 3 && once('thud', 0.06)) SND.thud(e.J);
+      } else if (e.type === 'touch') {   // 목표 구름에 닿음 → 슬로모 · 구름 폭
+        G.slow = 0.3; G.slowT = 0.4; G.squash[e.stage] = 1; SND.poff(); buzz(25); G.shake = Math.max(G.shake, 3);
+      } else if (e.type === 'snap') {
+        popup('똑!', e.x, e.y + 0.3, 18, '#ffffff'); if (once('snap', 0.08)) SND.snap();
+      } else if (e.type === 'puff') {
+        var pb = null; G.W.friends.forEach(function (f) { if (f.ud.id === e.id) pb = f; });
+        if (pb) { var c = pb.getPosition(); popup('빵빵!', c.x, c.y + 0.9, 24, '#ff5d5d'); ring(c.x, c.y, 0.8, '#ffffff'); }
+        SND.inflate(); buzz(20); G.tut.tapShown = true;
+      }
+    });
+  }
+
+  /* ---------------- 진행 ---------------- */
+  function update(rdt) {
+    G.t += rdt; G.shake *= Math.exp(-rdt * 9);
+    if (G.slowT > 0) { G.slowT -= rdt; if (G.slowT <= 0) G.slow = 1; }
+    camUpdate(rdt);
+    G.fx = G.fx.filter(function (p) {
+      p.t += rdt;
+      if (p.type === 'dust') { p.x += p.vx * rdt; p.y += p.vy * rdt; p.s += 30 * rdt; }
+      else if (p.type === 'spark' || p.type === 'chip') { p.x += p.vx * rdt; p.y += p.vy * rdt; p.vy -= PHY.G * rdt; p.r = (p.r || 0) + (p.vr || 0) * rdt; }
+      return p.t < p.life;
+    });
+    G.pops = G.pops.filter(function (p) { p.t += rdt; return p.t < p.life; });
+    G.trayWiggle = Math.max(0, (G.trayWiggle || 0) - rdt);
+    G.tickPulse = Math.max(0, G.tickPulse - rdt * 6); if (G.ghostGuide) G.ghostGuide.t += rdt; G.kick = Math.max(0, (G.kick || 0) - rdt);
+    G.W.friends.forEach(function (b) { b.ud.sq = Math.max(0, (b.ud.sq || 0) - rdt * 2); b.ud.str = Math.max(0, (b.ud.str || 0) - rdt * 5); });
+    Object.keys(G.squash).forEach(function (k) { G.squash[k] = Math.max(0, G.squash[k] - rdt * 2.5); });
+    if (G.oops) { G.oops.t += rdt; if (G.oops.t > 1) G.oops = null; }
+    if (G.photo) { G.photo.t += rdt; if (G.photo.t > 2.2) G.photo = null; }
+    // 트레이 친구 애니메이션
+    G.tray.forEach(function (t) {
+      t.sq = Math.max(0, t.sq - rdt * 2.5);
+      if (t.status === 'return') { t.k += rdt / (t.slowBack ? 0.55 : 0.3); if (t.k >= 1) { t.status = t.dizzyBack ? 'dizzy' : 'ready'; t.dizzyBack = false; t.slowBack = false; t.sq = 0.6; } }
+      if (t.status === 'falling') {
+        t.fallT += rdt;
+        if (t.fallT > 0.8 && t.body) { var c = t.body.getPosition(); if (!t.body.ud.dead) removeFriend(G.W, t.body); t.body = null; t.status = 'return'; t.dizzyBack = true; t.from = { x: sx(c.x), y: sy(c.y), sc: cam.ppm }; t.k = 0; }
+      }
+    });
+    if (G.state === 'intro') { G.introT += rdt; if (G.introT > G.introHold + 0.6) { G.state = 'build'; } }
+    if (G.state === 'land') landSequence(rdt);
+    // 물리: 고정 step 1/60, 한 프레임 최대 3 step (히트스톱 동안은 멈춤, 슬로모션은 시간만 줄임)
+    if (G.freeze > 0) { G.freeze -= rdt * 1000; }
+    else {
+      G.acc += rdt * G.slow;
+      var n = 0;
+      while (G.acc >= PHY.DT && n < 3) { stepW(G.W); G.acc -= PHY.DT; n++; stepGame(); if (G.freeze > 0) { G.acc = 0; break; } }
+      if (n >= 3) G.acc = Math.min(G.acc, PHY.DT);
+      onEvents();
+    }
+    G.alpha = Math.max(0, Math.min(1, G.acc / PHY.DT));
+    if (G.state === 'build') {
+      G.idle += rdt; G.tut.idle += rdt;
+      var nStack = stackFriends(G.W).length;
+      if (G.tut.step === 1 && nStack >= 2) { G.tut.step = 2; G.tut.idle = 0; }
+      if (G.tut.step === 2 && nStack === 0) G.tut.step = 1;
+      if (!G.drag && G.idle > 3 && G.tut.step === 0) { G.tut.step = nStack >= 1 ? 2 : 1; G.tut.idle = 0; }
+      unstick();
+    }
+  }
+  /** step 마다: 비행 따라가기 · 착지 판정 시점 */
+  function stepGame() {
+    if (G.state !== 'fly') return;
+    G.flyT += PHY.DT;
+    var W = G.W, fl = W.friends.filter(function (b) { return b.ud.state === 'fly' && !b.ud.gone; }), c = comOf(fl);
+    if (c) { G.follow.x = c.x; G.follow.y = c.y; }
+    G.trailT += PHY.DT;
+    if (c && G.trailT >= 0.06 && W.landT < 0) { G.trailT = 0; G.trail.push({ x: c.x, y: c.y }); }
+    G.quietT = quiet(W) ? G.quietT + PHY.DT : 0;
+    var done = W.landT >= 0 ? (G.quietT >= 0.4 || W.t - W.landT >= PHY.LAND_WAIT) : ((G.quietT >= 0.4 && G.flyT > 0.8) || G.flyT >= 5);
+    if (done) endTurnGame();
+  }
+  /** 남은 친구가 전부 어질이면(쏠 탑도, 집을 친구도 없음) 바로 정신 차리게 — 막힘 방지 */
+  function unstick() {
+    if (G.drag) return;
+    var busy = G.tray.some(function (t) { return t.status === 'ready' || t.status === 'stack' || t.status === 'falling' || t.status === 'drag' || (t.status === 'return' && !t.dizzyBack); });
+    if (busy || stackFriends(G.W).length) return;
+    var dz = G.tray.filter(function (t) { return t.status === 'dizzy' || (t.status === 'return' && t.dizzyBack); });
+    if (!dz.length) { checkLose(); return; }
+    if (dz.some(function (t) { return t.status === 'return'; })) return;
+    dz.forEach(function (t) { t.status = 'ready'; t.sq = 0.6; }); SND.pop(); G.trayWiggle = 0.3;
+  }
+  function checkLose() {
+    if (G.state !== 'build' || G.won) return;
+    if (G.flags <= 0 || available() === 0) { G.state = 'lose'; SND.lose(); clearTimeout(loseTimer); loseTimer = setTimeout(showLose, 500); }
+  }
+  /** 사진: 착지 순간 탑 둘레를 오려 폴라로이드로 (실제 물리 장면 그대로) */
+  function snapPhoto(cx, cy) {
+    try {
+      var w = 150, h = 150, c2 = document.createElement('canvas'); c2.width = w * dpr; c2.height = h * dpr;
+      var X = (cx - w / 2) * s * dpr, Y = (cy - h * 0.62) * s * dpr;
+      c2.getContext('2d').drawImage(cv, X, Y, w * s * dpr, h * s * dpr, 0, 0, w * dpr, h * dpr);
+      G.photo = { img: c2, t: 0 };
+    } catch (e) { G.photo = null; }
+  }
+  function endTurnGame() {
+    var W = G.W, pos = {};
+    W.friends.forEach(function (b) { var p = b.getPosition(); pos[b.ud.id] = { x: p.x, y: p.y, a: b.getAngle() }; });
+    var res = endTurn(W);
+    G.lastTrail = G.trail; G.trail = [];
+    if (!res.ok) {   // 못 닿음: 날린 친구는 어질 → 같은 자리에서 다시
+      res.fell.forEach(function (id) { var t = trayItem(id), p = pos[id]; if (!t) return; t.status = 'return'; t.dizzyBack = true; t.from = { x: p ? sx(p.x) : Wl / 2, y: p ? sy(p.y) : groundSY, sc: cam.ppm }; t.k = 0; });
+      popup('어이쿠', G.follow.x, G.follow.y + 1, 26, '#ffffff'); SND.oops();
+      G.state = 'build'; G.idle = 0;
+      checkLose();
+      return;
+    }
+    // 착! — 선 친구는 잠깐 그 자리에 보여 주고(착-착-착) 트레이로, 남은·떨어진 친구는 아래에 남음
+    var C = LEVEL.clouds[res.stage - 1];
+    G.result = { stage: res.stage, stood: res.stood.slice().sort(function (p, q) { return p.y - q.y; }), t: 0, center: res.center, house: !!C.house };
+    // 함께 선 친구만 위로 간다. 떨어진 친구·받침에 남은 친구·트레이에 두고 온 친구는 아래 구름에 남아 손을 흔든다 (데려가려면 함께 쌓아야)
+    var stoodIds = {}; res.stood.forEach(function (f) { stoodIds[f.id] = 1; });
+    G.tray.slice().forEach(function (t) { if (stoodIds[t.id]) return; G.left.push({ kind: t.kind, stage: res.stage - 1, id: t.id }); G.tray = G.tray.filter(function (q) { return q !== t; }); });
+    var pts = res.stood.length * 100 + (res.center != null && res.center < 0.45 ? 200 : 0); addScore(pts);
+    G.state = 'land'; G.landT = 0;
+    var top = 0, cx = 0; res.stood.forEach(function (f) { top = Math.max(top, f.y); cx += f.x; }); cx /= Math.max(1, res.stood.length);
+    G.photoAt = { x: cx, y: top };
+  }
+  /** 착지 연출: 도장 → 착-착-착(아래부터, 도·미·솔) → 사진 → 기다리던 친구 합류 → 다음 구름 */
+  function landSequence(rdt) {
+    var R = G.result; R.t += rdt;
+    var n = R.stood.length, t0 = 0.35;
+    R.stood.forEach(function (f, i) {
+      if (!f.done && R.t >= t0 + i * 0.35) {
+        f.done = true; SND.chak(i);
+        popup({ kwang: '쿵', puff: '피식', mong: '통', gil: '쭉' }[f.kind] || '착', f.x + 0.7, f.y + 0.3, 20, '#ffffff');
+        f.pop = 1;
+      }
+      if (f.pop) f.pop = Math.max(0, f.pop - rdt * 3);
+    });
+    if (!R.photo && R.t >= t0 + n * 0.35) { R.photo = true; snapPhoto(sx(G.photoAt.x), sy(G.photoAt.y)); SND.shutter(); G.flash = 1; if (R.center != null && R.center < 0.45) popup('꽃방석!', G.photoAt.x, G.photoAt.y + 1.8, 24, '#ff8fb1'); }
+    if (G.flash) G.flash = Math.max(0, G.flash - rdt * 4);
+    if (R.t >= t0 + n * 0.35 + 0.9 && !R.joined) {
+      R.joined = true;
+      // 선 친구들 → 트레이 (폴짝)
+      R.stood.forEach(function (f) { var t = trayItem(f.id); if (t) { t.status = 'return'; t.dizzyBack = false; t.from = { x: sx(f.x), y: sy(f.y), sc: cam.ppm }; t.k = 0; } });
+      var C = LEVEL.clouds[R.stage - 1];
+      if (C.wait && !G.joined[R.stage]) {   // 기다리던 친구 "나도!"
+        G.joined[R.stage] = true;
+        var nt = { id: nextTrayId++, kind: C.wait, status: 'return', bob: 0, sq: 0, k: 0, slowBack: true, from: { x: sx(C.x + C.w / 2 - 0.6), y: sy(C.top + 0.5), sc: cam.ppm } };
+        G.tray.push(nt); popup('나도!', C.x + C.w / 2 - 0.6, C.top + 1.6, 22, '#ffffff'); SND.pick();
+      }
+      if (R.house) { G.state = 'win'; G.won = true; SND.ko(); setTimeout(showWin, 1400); return; }
+    }
+    if (R.joined && R.t >= t0 + n * 0.35 + 1.5) { G.state = 'build'; G.idle = 0; G.result = null; }
+  }
+
+  /* ---------------- 그리기 도구 ---------------- */
+  function rr(x, y, w, h, r) {
+    r = Math.max(0, Math.min(r, w / 2, h / 2));
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+  }
+  function polyPath(v, k) { ctx.beginPath(); v.forEach(function (p, i) { if (i) ctx.lineTo(p.x * k, -p.y * k); else ctx.moveTo(p.x * k, -p.y * k); }); ctx.closePath(); }
+  function eyes(ex, ey, gap, r, lid, mood, look) {
+    var worry = mood >= 2, spiral = mood === 9;
+    [-1, 1].forEach(function (sd) {
+      var x = ex + sd * gap;
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(x, ey, r, r * 1.2, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = Math.max(1.2, r * 0.3); ctx.strokeStyle = OL; ctx.stroke();
+      if (spiral) { ctx.beginPath(); for (var a = 0; a < 9; a += 0.4) ctx.lineTo(x + Math.cos(a + G.t * 6) * a / 9 * r * 0.8, ey + Math.sin(a + G.t * 6) * a / 9 * r * 0.8); ctx.stroke(); return; }
+      if (look === 'squint') { ctx.beginPath(); ctx.moveTo(x - r * 0.8, ey - r * 0.3 * sd * 0); ctx.lineTo(x + r * 0.2 * sd, ey); ctx.lineTo(x - r * 0.8, ey + r * 0.35); ctx.stroke(); return; }
+      var pr = look === 'wide' ? 0.42 : 0.55;
+      ctx.fillStyle = '#2a1d17'; ctx.beginPath(); ctx.ellipse(x + r * 0.3, ey + r * 0.15 + (worry ? r * 0.25 : 0), r * pr, r * (pr + 0.15), 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + r * 0.15, ey - r * 0.35, r * 0.25, 0, Math.PI * 2); ctx.fill();
+      if (lid && !worry && look !== 'wide') { ctx.fillStyle = lid; ctx.beginPath(); ctx.ellipse(x, ey - r * 0.5, r * 1.15, r * 0.75, 0, Math.PI, 0); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = Math.max(1.2, r * 0.3); ctx.beginPath(); ctx.moveTo(x - r * 1.1, ey - r * 0.2); ctx.lineTo(x + r * 1.1, ey - r * 0.2); ctx.stroke(); }
+      if (worry) { ctx.strokeStyle = OL; ctx.lineWidth = Math.max(1.2, r * 0.3); ctx.beginPath(); ctx.moveTo(x - r, ey - r * 1.5 - sd * r * 0.3); ctx.lineTo(x + r, ey - r * 1.5 + sd * r * 0.3); ctx.stroke(); }
+    });
+  }
+  function mouth(x, y, r, mood, look) {
+    ctx.strokeStyle = OL; ctx.lineWidth = Math.max(1.2, r * 0.35); ctx.lineCap = 'round';
+    if (look === 'wide' || mood >= 3) { ctx.fillStyle = '#5a1f1a'; ctx.beginPath(); ctx.ellipse(x, y, r * 0.6, r * 0.8, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); return; }
+    ctx.beginPath(); if (mood >= 2) { ctx.moveTo(x - r, y + r * 0.3); ctx.quadraticCurveTo(x, y - r * 0.4, x + r, y + r * 0.3); } else { ctx.moveTo(x - r, y); ctx.quadraticCurveTo(x, y + r * 0.9, x + r, y); } ctx.stroke();
+  }
+  function tuft(x, y, k) { ctx.strokeStyle = OL; ctx.lineWidth = Math.max(1.5, 3 * k); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + 2 * k, y - 12 * k, x + 9 * k, y - 14 * k); ctx.stroke(); }
+  function sweat(x, y, k) { ctx.fillStyle = '#8fd6ff'; ctx.strokeStyle = '#3b6b8c'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x, y - 6 * k); ctx.quadraticCurveTo(x + 5 * k, y + 2 * k, x, y + 4 * k); ctx.quadraticCurveTo(x - 5 * k, y + 2 * k, x, y - 6 * k); ctx.fill(); ctx.stroke(); }
+  /**
+   * 친구: 원점 = 몸 중심(물리 몸과 같은 자리), k = px/m. 외곽선 = 충돌 모양 ±2px.
+   * o: { mood 0 태평 · 2 땀 · 3 질겁 · 9 어질, look 'wide'(날 때) · 'squint'(꽉 당김), sq 찌부, grey }
+   */
+  function drawFriend(kind, k, o) {
+    o = o || {};
+    var d = DIMS[kind], L = LOOK[kind], mood = o.mood || 0, sc = k / 44;
+    var sq = o.sq || 0, sY = 1 - 0.1 * sq, sX = 1 + 0.08 * sq;
+    if (o.str) { sY *= 1 + 0.12 * o.str; sX *= 1 - 0.1 * o.str; }
+    ctx.save();
+    if (o.grey) ctx.globalAlpha *= 0.55;
+    ctx.scale(sX, sY);
+    var fill = o.grey ? '#c9c2bb' : L.col;
+    if (kind === 'mong' || kind === 'puff') {
+      var R = d.r * k, v = POLY[kind];
+      if (kind === 'puff') {   // 가시 (작게: 충돌 모양 밖으로 3px 이내)
+        ctx.fillStyle = OL;
+        for (var sp = 0; sp < 12; sp++) { var an = sp / 12 * Math.PI * 2 + Math.PI / 12; ctx.beginPath(); ctx.moveTo(Math.cos(an - 0.14) * R * 0.95, Math.sin(an - 0.14) * R * 0.95); ctx.lineTo(Math.cos(an) * (R + 3), Math.sin(an) * (R + 3)); ctx.lineTo(Math.cos(an + 0.14) * R * 0.95, Math.sin(an + 0.14) * R * 0.95); ctx.fill(); }
+      }
+      // 털뭉치: 꼭짓점마다 둥근 혹 (충돌 10각형 꼭짓점과 같은 자리)
+      ctx.fillStyle = OL; polyPath(v, k); ctx.lineWidth = 5; ctx.lineJoin = 'round'; ctx.strokeStyle = OL; ctx.stroke();
+      if (kind === 'mong') v.forEach(function (p) { ctx.beginPath(); ctx.arc(p.x * k * 0.84, -p.y * k * 0.84, R * 0.2 + 2.2, 0, Math.PI * 2); ctx.fill(); });
+      ctx.fillStyle = fill; polyPath(v, k); ctx.fill();
+      if (kind === 'mong') { v.forEach(function (p) { ctx.beginPath(); ctx.arc(p.x * k * 0.84, -p.y * k * 0.84, R * 0.2, 0, Math.PI * 2); ctx.fill(); }); }
+      ctx.fillStyle = o.grey ? '#e2ddd8' : L.hi;
+      if (kind === 'mong') { ctx.beginPath(); ctx.ellipse(-R * 0.3, -R * 0.42, R * 0.32, R * 0.18, -0.5, 0, Math.PI * 2); ctx.fill(); }
+      else { ctx.beginPath(); ctx.ellipse(0, R * 0.35, R * 0.55, R * 0.35, 0, 0, Math.PI * 2); ctx.fill(); }
+      eyes(R * 0.1, -R * 0.12, R * 0.32, R * 0.24, null, mood, o.look);
+      mouth(R * 0.12, R * 0.32, R * 0.16, mood, o.look);
+      tuft(0, -R * 0.92, sc);
+      if (mood === 2 || mood === 3) sweat(R * 0.82, -R * 0.45, sc);
+    } else if (kind === 'gil') {
+      var w = d.w * k, h = d.h * k, rt = d.rt * k, rb = d.rb * k;
+      var path = function (g) { ctx.beginPath(); ctx.moveTo(-w / 2 + rb - g, h / 2 + g); ctx.lineTo(w / 2 - rb + g, h / 2 + g); ctx.lineTo(w / 2 + g, h / 2 - rb); ctx.lineTo(w / 2 + g, -h / 2 + rt); ctx.arc(w / 2 - rt, -h / 2 + rt, rt + g, 0, -Math.PI / 2, true); ctx.lineTo(-w / 2 + rt, -h / 2 - g); ctx.arc(-w / 2 + rt, -h / 2 + rt, rt + g, -Math.PI / 2, -Math.PI, true); ctx.lineTo(-w / 2 - g, h / 2 - rb); ctx.closePath(); };
+      ctx.fillStyle = OL; path(1.5); ctx.fill();
+      ctx.fillStyle = fill; path(-1); ctx.fill();
+      ctx.strokeStyle = o.grey ? '#a9a29b' : L.dark; ctx.lineWidth = Math.max(1.5, 2.5 * sc);
+      for (var q = 1; q < 5; q++) { var yy = -h / 2 + h * (0.3 + q * 0.14); ctx.beginPath(); ctx.moveTo(-w / 2 + 3, yy); ctx.quadraticCurveTo(0, yy + 5 * sc, w / 2 - 3, yy); ctx.stroke(); }
+      ctx.fillStyle = o.grey ? '#e2ddd8' : L.hi; rr(-w * 0.32, -h / 2 + 6 * sc, w * 0.22, h * 0.25, w * 0.1); ctx.fill();
+      eyes(w * 0.08, -h / 2 + w * 0.62, w * 0.24, w * 0.17, o.grey ? '#c9c2bb' : L.col, mood, o.look);
+      mouth(w * 0.1, -h / 2 + w * 1.05, w * 0.12, mood, o.look);
+      tuft(0, -h / 2 - 1, sc);
+      if (mood === 2 || mood === 3) sweat(w * 0.55, -h / 2 + w * 0.4, sc);
+    } else {
+      var w2 = d.w * k, h2 = d.h * k, r2 = d.r * k * 1.25;
+      ctx.fillStyle = OL; rr(-w2 / 2 - 1.5, -h2 / 2 - 1.5, w2 + 3, h2 + 3, r2 + 1.5); ctx.fill();
+      ctx.fillStyle = fill; rr(-w2 / 2 + 1, -h2 / 2 + 1, w2 - 2, h2 - 2, r2); ctx.fill();
+      ctx.fillStyle = o.grey ? '#b5aea7' : '#8b949e'; [[-0.3, 0.25, 4], [0.32, 0.3, 3], [0.05, 0.35, 2.5], [-0.38, -0.2, 2.5]].forEach(function (p) { ctx.beginPath(); ctx.arc(p[0] * w2, p[1] * h2, p[2] * sc, 0, Math.PI * 2); ctx.fill(); });
+      ctx.fillStyle = o.grey ? '#e2ddd8' : L.hi; rr(-w2 * 0.42, -h2 * 0.4, w2 * 0.3, h2 * 0.14, 4 * sc); ctx.fill();
+      eyes(w2 * 0.06, -h2 * 0.04, w2 * 0.15, h2 * 0.17, o.grey ? '#c9c2bb' : L.col, mood, o.look);
+      mouth(w2 * 0.08, h2 * 0.24, h2 * 0.1, mood, o.look);
+      tuft(0, -h2 / 2 - 1, sc);
+      if (mood === 2 || mood === 3) sweat(w2 * 0.45, -h2 * 0.3, sc);
+    }
+    ctx.restore();
+  }
+  /** 물리 몸의 그릴 자리 (step 사이 보간) */
+  function pose(b) {
+    var p = b.getPosition(), a = b.getAngle(), al = G.alpha;
+    if (b._px == null) return { x: p.x, y: p.y, a: a };
+    return { x: b._px + (p.x - b._px) * al, y: b._py + (p.y - b._py) * al, a: b._pa + (a - b._pa) * al };
+  }
+  function at(b, fn) { var q = pose(b); ctx.save(); ctx.translate(sx(q.x), sy(q.y)); ctx.rotate(-q.a); fn(q); ctx.restore(); }
+
+  /* ---------------- 쏠림 표정: 내 위에 실린 무게중심이 받치는 접촉 구간 끝에서 얼마나 가까운가 ---------------- */
+  function supports(b) {
+    var xs = [], ups = [];
+    for (var ce = b.getContactList(); ce; ce = ce.next) {
+      var o = ce.other, ou = o && o.ud; if (!ou || !ce.contact.isTouching()) continue;
+      if (ou.type !== 'plate' && !(ou.type === 'friend' && ou.state === 'stack')) continue;
+      var wm = ce.contact.getWorldManifold(null), n = ce.contact.getManifold().pointCount; if (!wm || !n) continue;
+      var nUp = ce.contact.getFixtureA().getBody() === o ? wm.normal.y : -wm.normal.y;   // 받치는 쪽 → 나
+      if (nUp > 0.6) for (var i = 0; i < n; i++) xs.push(wm.points[i].x);
+      else if (nUp < -0.6 && ou.type === 'friend') ups.push(o);
+    }
+    return { xs: xs, ups: ups };
+  }
+  function loadCom(b, seen) {
+    seen = seen || {}; seen[b.ud.id] = 1;
+    var m = b.getMass(), c = b.getWorldCenter(), M = m, X = m * c.x;
+    supports(b).ups.forEach(function (o) { if (seen[o.ud.id]) return; var r = loadCom(o, seen); M += r.M; X += r.M * r.x; });
+    return { M: M, x: X / M };
+  }
+  function moodOf(b) {
+    var u = b.ud;
+    if (u.state === 'fell') return 3;
+    if (u.state === 'fly') return 0;
+    if (Math.abs(b.getAngularVelocity()) > 1.2) return 3;
+    var sp = supports(b); if (!sp.xs.length) return Math.hypot(b.getLinearVelocity().x, b.getLinearVelocity().y) > 0.5 ? 3 : 0;
+    var lo = Math.min.apply(null, sp.xs), hi = Math.max.apply(null, sp.xs), L = loadCom(b), m = Math.min(L.x - lo, hi - L.x);
+    u.margin = m;
+    return m < 0.05 ? 3 : m < 0.12 ? 2 : 0;
+  }
+
+  /* ---------------- 그리기 ---------------- */
+  /** 몽글 구름: 윗면은 평평(물리와 같음, 위로 3px 이내 혹), 아래·옆은 뭉게뭉게. sq = 착지 순간 폭 눌림 */
+  function drawCloud(c, i, k) {
+    var sq = G.squash[i + 1] || 0, x0 = sx(c.x - c.w / 2), x1 = sx(c.x + c.w / 2), yt = sy(c.top) + sq * 6, yb = sy(c.top - 0.7), w = x1 - x0;
+    ctx.save();
+    ctx.fillStyle = 'rgba(80,120,170,0.18)'; ctx.beginPath(); ctx.ellipse((x0 + x1) / 2, yb + 10, w * 0.5, 9, 0, 0, Math.PI * 2); ctx.fill();
+    var puffs = Math.max(3, Math.round(c.w * 1.6));
+    ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#9fc4e6'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (var j = 0; j < puffs; j++) { var px = x0 + w * (j + 0.5) / puffs, r = w / puffs * 0.62; ctx.moveTo(px + r, yb - 2); ctx.arc(px, yb - 2, r, 0, Math.PI * 2); }
+    ctx.moveTo(x0 + 6, yt); ctx.arc(x0 + 10, (yt + yb) / 2, (yb - yt) / 2 + 2, Math.PI * 0.5, Math.PI * 1.5);
+    ctx.moveTo(x1 - 6, yt); ctx.arc(x1 - 10, (yt + yb) / 2, (yb - yt) / 2 + 2, -Math.PI * 0.5, Math.PI * 0.5);
+    ctx.stroke(); ctx.fill();
+    rr(x0 + 4, yt, w - 8, yb - yt, 12); ctx.fill();
+    for (var q = 0; q < puffs + 1; q++) { var tx = x0 + 8 + (w - 16) * q / puffs; ctx.beginPath(); ctx.arc(tx, yt + 3, 6, Math.PI, 0); ctx.fill(); }
+    ctx.fillStyle = '#e8f3ff'; rr(x0 + 10, yb - 12, w - 20, 8, 4); ctx.fill();
+    ctx.restore();
+    // 꽃방석 (다음 발사 스프링 자리)
+    if (!c.house) {
+      var cx = sx(c.x), cy = sy(c.top) + sq * 6;
+      ctx.fillStyle = '#ffb3cf'; ctx.beginPath(); ctx.ellipse(cx, cy + 2, 0.85 * k, 6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ff7fae'; for (var f = -2; f <= 2; f++) { ctx.beginPath(); ctx.arc(cx + f * 0.32 * k, cy + 1, 3.2, 0, Math.PI * 2); ctx.fill(); }
+    }
+  }
+  /** 하늘집: 구름 위 오른쪽 끝의 작은 집 (착지는 구름 윗면) */
+  function drawHouse(c, k) {
+    var bx = sx(c.x + c.w / 2 - 0.55), by = sy(c.top), w = 0.9 * k, h = 0.8 * k;
+    ctx.fillStyle = '#fff6e8'; ctx.strokeStyle = OL; ctx.lineWidth = 2.5; rr(bx - w / 2, by - h, w, h, 4); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#ff7a59'; ctx.beginPath(); ctx.moveTo(bx - w * 0.65, by - h); ctx.lineTo(bx, by - h - 0.55 * k); ctx.lineTo(bx + w * 0.65, by - h); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#ffd23f'; rr(bx - w * 0.15, by - h * 0.55, w * 0.3, h * 0.55, 3); ctx.fill(); ctx.stroke();
+    ctx.font = Math.max(12, 0.32 * k) + 'px Jua, sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = '#ffffff'; ctx.strokeText('하늘집', bx, by - h - 0.7 * k); ctx.fillStyle = OL; ctx.fillText('하늘집', bx, by - h - 0.7 * k);
+  }
+  function render() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    var shx = (RND() - 0.5) * G.shake * 2, shy = (RND() - 0.5) * G.shake * 2;
+    ctx.setTransform(dpr * s, 0, 0, dpr * s, shx * dpr * s, shy * dpr * s);
+    var W = G.W, L = W.level, k = cam.ppm;
+    // 하늘: 높이 올라갈수록 짙은 하늘·노을
+    var hgt = Math.max(0, Math.min(1, cam.y / 18)), g = ctx.createLinearGradient(0, 0, 0, groundSY);
+    g.addColorStop(0, hgt > 0.5 ? '#7fb6ff' : '#9fd8ff'); g.addColorStop(0.7, hgt > 0.6 ? '#ffd9c2' : '#dff3ff'); g.addColorStop(1, '#fff1cf');
+    ctx.fillStyle = g; ctx.fillRect(-40, -40, Wl + 80, Hl + 80);
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    for (var bc = 0; bc < 9; bc++) { var by = (bc * 4.3 + 2), cxw = ((bc * 37) % 9) - 4.5, X = Wl / 2 + (cxw - cam.x) * k * 0.3, Y = groundSY - (by - cam.y * 0.4) * k * 0.4; if (Y < -40 || Y > groundSY + 20) continue; ctx.beginPath(); ctx.ellipse(X, Y, 30, 11, 0, 0, Math.PI * 2); ctx.ellipse(X + 20, Y - 7, 20, 11, 0, 0, Math.PI * 2); ctx.fill(); }
+    // 땅
+    var gy = sy(L.ground.top);
+    if (gy < Hl + 40) {
+      ctx.fillStyle = '#b9e3a4'; ctx.beginPath(); ctx.ellipse(sx(-3), gy + 6, 5 * k, 1.4 * k, 0, Math.PI, 0); ctx.ellipse(sx(5), gy + 6, 6 * k, 1.2 * k, 0, Math.PI, 0); ctx.fill();
+      ctx.fillStyle = '#8a5a3b'; ctx.fillRect(-40, gy, Wl + 80, Hl);
+      ctx.fillStyle = '#7bc35e'; ctx.fillRect(-40, gy - 3, Wl + 80, 7);
+    }
+    // 구름들 · 하늘집 · 기다리는 친구 · 남겨진 친구
+    L.clouds.forEach(function (c, i) {
+      if (sy(c.top) < -120 || sy(c.top) > Hl + 120) return;
+      drawCloud(c, i, k);
+      if (c.house) drawHouse(c, k);
+      if (c.wait && !G.joined[i + 1]) {
+        var d = DIMS[c.wait], hh = d.shape === 'ngon' ? d.r * Math.cos(Math.PI / d.n) : d.h / 2, wx = c.x + c.w / 2 - 0.6, hop = Math.abs(Math.sin(G.t * 3 + i)) * 4;
+        ctx.save(); ctx.translate(sx(wx), sy(c.top + hh) - hop); drawFriend(c.wait, k, { look: 'wide' }); ctx.restore();
+        ctx.save(); ctx.translate(sx(wx) + 14, sy(c.top + hh * 2) - 14 - hop); ctx.rotate(Math.sin(G.t * 8) * 0.3); ctx.font = '18px Jua, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('👋', 0, 0); ctx.restore();
+      }
+    });
+    G.left.forEach(function (f, i) {   // 아래에 남겨진 친구: 손 흔들며 기다림
+      var by2 = f.stage === 0 ? L.ground.top : L.clouds[f.stage - 1].top, d = DIMS[f.kind], hh = d.shape === 'ngon' ? d.r * Math.cos(Math.PI / d.n) : d.h / 2;
+      var fx2 = (f.stage === 0 ? L.ground.x : L.clouds[f.stage - 1].x) - 1.1 + (i % 3) * 0.55;
+      if (sy(by2) > Hl + 60 || sy(by2) < -60) return;
+      ctx.save(); ctx.globalAlpha = 0.85; ctx.translate(sx(fx2), sy(by2 + hh)); drawFriend(f.kind, k * 0.8, { mood: 2 }); ctx.restore();
+    });
+    // 지난 발사 궤적 (흐린 점) · 이번 비행 궤적
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'; G.lastTrail.forEach(function (p) { ctx.beginPath(); ctx.arc(sx(p.x), sy(p.y), 3, 0, Math.PI * 2); ctx.fill(); });
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; G.trail.forEach(function (p) { ctx.beginPath(); ctx.arc(sx(p.x), sy(p.y), 3.2, 0, Math.PI * 2); ctx.fill(); });
+
+    if (!(G.result && !G.result.joined)) drawLauncher(W, k);   // 착지 연출 동안엔 다음 발사대를 숨김(선 친구와 겹치지 않게)
+    // 친구 (물리 몸)
+    var Ln = W.launch;
+    W.friends.forEach(function (b) {
+      var u = b.ud, mood = moodOf(b), j = mood === 3 ? 1.4 : mood === 2 ? 0.6 : 0;
+      var look = u.state === 'fly' && G.flyT < 1.5 ? 'wide' : (G.aiming && G.p > 0.6 && u.state === 'stack') ? 'squint' : null;
+      var press = G.aiming && u.state === 'stack' ? G.p * 0.5 : 0;
+      at(b, function () {
+        if (j) ctx.translate((RND() - 0.5) * j * 2, 0);
+        if (G.maxed && u.state === 'stack') ctx.translate((RND() - 0.5) * 3, (RND() - 0.5) * 2);
+        if (u.puffed) ctx.scale(PHY.PUFF_R2 / DIMS.puff.r, PHY.PUFF_R2 / DIMS.puff.r);   // 부풀 빵빵 (몸도 실제로 커져 있음)
+        drawFriend(u.kind, k, { mood: mood, look: look, sq: Math.max(u.sq, press), str: u.str });
+      });
+      // 꽝돌 오뚝이: "끄응" 아래 화살표
+      if (Ln && Ln.kwang && b === Ln.bottom && Ln.righting && u.state === 'fly') { var q = pose(b); ctx.save(); ctx.translate(sx(q.x), sy(q.y) + 0.55 * k); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 16); ctx.moveTo(-7, 9); ctx.lineTo(0, 16); ctx.lineTo(7, 9); ctx.stroke(); ctx.restore(); }
+    });
+    // 착지 연출: 선 친구 (몸은 이미 정리됨 → 그 자리 그림으로)
+    if (G.result && !G.result.joined) G.result.stood.forEach(function (f) {
+      ctx.save(); ctx.translate(sx(f.x), sy(f.y)); ctx.rotate(-f.a); var pp = 1 + (f.pop || 0) * 0.18; ctx.scale(pp, 2 - pp);
+      if (f.kind === 'puff') ctx.scale(1 + (f.pop || 0) * 0.3, 1 + (f.pop || 0) * 0.3);
+      drawFriend(f.kind, k, { look: f.done ? null : 'wide' }); ctx.restore();
+    });
+    // 조준 점선 (앞부분만) · 당김 손잡이
+    if (G.aiming && G.p > 0) drawGuide(W, k);
+    if (G.ghostGuide && G.ghostGuide.t < 0.7) guideDots(G.ghostGuide.pts, k, 1 - G.ghostGuide.t / 0.7);
+    if (G.tutAimDemo) drawGuideDemo(k);
+    // 효과
+    G.fx.forEach(function (p) {
+      var a = 1 - p.t / p.life, X = sx(p.x), Y = sy(p.y);
+      if (p.type === 'dust') { ctx.fillStyle = 'rgba(255,248,235,' + (a * 0.7) + ')'; ctx.beginPath(); ctx.arc(X, Y, p.s, 0, Math.PI * 2); ctx.fill(); }
+      else if (p.type === 'spark') { ctx.strokeStyle = p.c; ctx.globalAlpha = a; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(X - p.vx * 0.03 * k, Y + p.vy * 0.03 * k); ctx.stroke(); ctx.globalAlpha = 1; }
+      else if (p.type === 'ring') { var q2 = p.t / p.life; ctx.strokeStyle = p.c; ctx.globalAlpha = 1 - q2; ctx.lineWidth = 5 * (1 - q2) + 1; ctx.beginPath(); ctx.arc(X, Y, p.r * k * (0.6 + q2 * 0.8), 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1; }
+    });
+    // 팝업
+    G.pops.forEach(function (p) {
+      var q = p.t / p.life, sc2 = q < 0.15 ? 0.6 + q / 0.15 * 0.6 : 1.2 - Math.min(0.2, (q - 0.15));
+      ctx.save(); ctx.globalAlpha = q > 0.75 ? (1 - q) / 0.25 : 1;
+      ctx.translate(sx(p.x), sy(p.y) - q * 30); ctx.scale(sc2, sc2);
+      ctx.font = p.size + 'px Jua, "Apple SD Gothic Neo", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.lineJoin = 'round'; ctx.lineWidth = p.size * 0.28; ctx.strokeStyle = OL; ctx.strokeText(p.text, 0, 0);
+      ctx.fillStyle = p.color; ctx.fillText(p.text, 0, 0); ctx.restore();
+    });
+    if (G.oops) { var oq = G.oops.t; ctx.save(); ctx.globalAlpha = 1 - Math.max(0, oq - 0.6) / 0.4; ctx.translate(sx(G.oops.x), sy(G.oops.y) - 30 - oq * 16); ctx.font = '26px Jua, sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 7; ctx.strokeStyle = OL; ctx.strokeText('삐끗!', 0, 0); ctx.fillStyle = '#ff6b5a'; ctx.fillText('삐끗!', 0, 0); ctx.restore(); }
+    // "착!" 도장
+    if (G.result) {
+      var R = G.result, C = L.clouds[R.stage - 1], q4 = Math.min(1, R.t / 0.22), sc4 = 2.4 - 1.4 * q4;
+      ctx.save(); ctx.translate(sx(C.x) - 10, sy(C.top) - 2.6 * k - 30); ctx.rotate(-0.12); ctx.scale(sc4, sc4); ctx.globalAlpha = Math.min(1, q4 * 1.5);
+      ctx.font = '50px Jua, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+      var txt = R.house && R.stood.length >= G.total ? '모두 착!' : '착!';   // 하늘집에 친구 전원이면 모두 착!
+      ctx.lineWidth = 12; ctx.strokeStyle = OL; ctx.strokeText(txt, 0, 0); ctx.fillStyle = '#ffd23f'; ctx.fillText(txt, 0, 0);
+      ctx.font = '24px Jua, sans-serif'; ctx.lineWidth = 7; ctx.strokeText('×' + R.stood.length, 62, 22); ctx.fillStyle = '#ffffff'; ctx.fillText('×' + R.stood.length, 62, 22);
+      ctx.restore();
+    }
+    if (G.flash) { ctx.fillStyle = 'rgba(255,255,255,' + G.flash * 0.8 + ')'; ctx.fillRect(-40, -40, Wl + 80, groundSY + 80); }
+    // 인증샷 폴라로이드 (오른쪽 위)
+    if (G.photo) {
+      var ph = G.photo, q5 = Math.min(1, ph.t / 0.3), a5 = ph.t > 1.8 ? Math.max(0, 1 - (ph.t - 1.8) / 0.4) : 1;
+      ctx.save(); ctx.globalAlpha = a5; ctx.translate(Wl - 82, 92 + (1 - q5) * -30); ctx.rotate(0.08 - (1 - q5) * 0.3);
+      ctx.fillStyle = '#ffffff'; ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 10; ctx.fillRect(-62, -62, 124, 144); ctx.shadowBlur = 0;
+      try { ctx.drawImage(ph.img, -54, -54, 108, 108); } catch (e) { /* 무시 */ }
+      ctx.fillStyle = OL; ctx.font = '15px Jua, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('착! 인증샷', 0, 72); ctx.restore();
+    }
+    // 부풀 톡 힌트 (첫 비행, 떨어지기 시작할 때)
+    if (G.state === 'fly' && G.hasPuff && !G.tut.tapShown && firstRun && W.launch && comOf(W.launch.group.filter(function (b) { return !b.ud.dead; })) && G.flyT > 0.35) {
+      var pz = (G.t * 2) % 1; hand(Wl * 0.72, 150, pz < 0.5);
+      ctx.font = '22px Jua, sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 6; ctx.strokeStyle = OL; ctx.strokeText('톡!', Wl * 0.72, 112); ctx.fillStyle = '#ff5d5d'; ctx.fillText('톡!', Wl * 0.72, 112);
+    }
+    drawTray(k);
+    drawDragPreview(k);
+    drawTutorial(k);
+  }
+  /** 발사대: 바닥(땅·구름)의 받침 → 스프링(눌릴수록 짧고 빨갛게) → 나무 판 + 무게 게이지 */
+  function drawLauncher(W, k) {
+    var P = PHY.PLATE, A = W.anchor, pl = pose(W.plate), bx = sx(A.x), by = sy(baseY());
+    var ca = Math.cos(pl.a), sa = Math.sin(pl.a), botX = pl.x + sa * P.hh, botY = pl.y - ca * P.hh;
+    var tx = sx(botX), ty = sy(botY), len = Math.hypot(tx - bx, ty - (by - 8)), comp = Math.max(0, Math.min(1, (A.y - pl.y) / PHY.PULL_Y));
+    ctx.fillStyle = '#5e6873'; rr(bx - 0.42 * k, by - 10, 0.84 * k, 14, 5); ctx.fill();
+    ctx.fillStyle = '#8b949e'; rr(bx - 0.36 * k, by - 9, 0.72 * k, 5, 3); ctx.fill();
+    var col = comp < 0.4 ? '#ffc23a' : comp < 0.75 ? '#ff9a3c' : '#ff5a4a';
+    var segs = 10, ax = bx, ay = by - 8, dx = tx - ax, dy = ty - ay, nx = -dy / (len || 1), ny = dx / (len || 1), wd = 0.26 * k;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    [[OL, 7], [col, 4]].forEach(function (st) {
+      ctx.strokeStyle = st[0]; ctx.lineWidth = st[1]; ctx.beginPath(); ctx.moveTo(ax, ay);
+      for (var i = 1; i < segs; i++) { var q = i / segs, sd = i % 2 ? 1 : -1; ctx.lineTo(ax + dx * q + nx * wd * sd, ay + dy * q + ny * wd * sd); }
+      ctx.lineTo(tx, ty); ctx.stroke();
+    });
+    ctx.save(); ctx.translate(sx(pl.x), sy(pl.y)); ctx.rotate(-pl.a);
+    var w = P.hw * 2 * k, h = Math.max(10, P.hh * 2 * k);
+    ctx.fillStyle = OL; rr(-w / 2 - 2, -h / 2 - 2, w + 4, h + 4, 6); ctx.fill();
+    ctx.fillStyle = '#d9a46c'; rr(-w / 2, -h / 2, w, h, 5); ctx.fill();
+    ctx.fillStyle = '#e8c08f'; rr(-w / 2 + 3, -h / 2 + 2, w - 6, h * 0.35, 3); ctx.fill();
+    if (G.kick > 0) { ctx.strokeStyle = 'rgba(255,255,255,' + G.kick * 4 + ')'; ctx.lineWidth = 3; for (var q2 = -2; q2 <= 2; q2++) { ctx.beginPath(); ctx.moveTo(q2 * w * 0.2, h); ctx.lineTo(q2 * w * 0.28, h + 14 + 10 * G.kick * 5); ctx.stroke(); } }
+    ctx.restore();
+    // 무게 게이지: 지금 탑의 무게 점 (●=1, ○=0.5) — 무거울수록 덜 날아감
+    var wsum = 0; stackFriends(W).forEach(function (b) { wsum += DIMS[b.ud.kind].w8; });
+    if (wsum > 0 && G.state === 'build') {
+      var gx = bx + 0.95 * k, gy2 = by - 14;
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; rr(gx - 4, gy2 - 12, 12 + Math.ceil(wsum) * 11, 22, 11); ctx.fill();
+      for (var d2 = 0; d2 < Math.ceil(wsum); d2++) { var full = d2 < Math.floor(wsum); ctx.beginPath(); ctx.arc(gx + 6 + d2 * 11, gy2 - 1, 4, 0, Math.PI * 2); if (full) { ctx.fillStyle = OL; ctx.fill(); } else { ctx.strokeStyle = OL; ctx.lineWidth = 1.5; ctx.stroke(); } }
+    }
+  }
+  function guideDots(pts, k, alpha) {
+    var i0 = Math.round(PHY.GUIDE_T0 / PHY.DT);
+    for (var i = i0; i < pts.length; i += 3) {
+      var q = (i - i0) / (pts.length - i0), r = 5.2 - q * 2.6, X = sx(pts[i].x), Y = sy(pts[i].y);
+      ctx.globalAlpha = alpha * (1 - q * 0.5);
+      ctx.fillStyle = '#fff'; ctx.strokeStyle = OL; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X, Y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+  function drawGuide(W, k) {
+    var gd = guideNow(W), d = G.drag;
+    if (gd && G.p >= PHY.P_MIN) guideDots(gd.pts, k, 1);
+    else if (gd) guideDots(gd.pts.slice(0, 14), k, 0.35);
+    if (d && d.type === 'pull') {
+      // 손가락 쪽: 누른 곳 → 지금 손가락 (흐린 줄 + 작은 원) — 손가락 밑에는 정보 없음
+      ctx.strokeStyle = 'rgba(59,42,34,0.25)'; ctx.lineWidth = 2; ctx.setLineDash([5, 6]); ctx.beginPath(); ctx.moveTo(d.x0, d.y0); ctx.lineTo(d.x, d.y); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.strokeStyle = 'rgba(59,42,34,0.4)'; ctx.beginPath(); ctx.arc(d.x0, d.y0, 8, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      // 받침 쪽: 판 양 끝에서 '당긴 방향'으로 늘어나는 고무줄 + 손잡이 (색 = 장력, 최대면 빨갛게 떨림)
+      var pl = pose(G.W.plate), P = PHY.PLATE, ca = Math.cos(pl.a), sa = Math.sin(pl.a);
+      var L = Math.min(1, G.p) * 50, th = G.theta * Math.PI / 180, gx = sx(pl.x) - Math.cos(th) * L, gy = Math.min(sy(baseY()) - 10, sy(pl.y) + Math.sin(th) * L + 6);   // 땅 밑으로는 안 감
+      if (G.p >= 0.95) { gx += (RND() - 0.5) * 3; gy += (RND() - 0.5) * 3; }
+      var col = G.p >= 0.95 ? '#ff5a4a' : G.p >= 0.6 ? '#ff9a3c' : G.p >= PHY.P_MIN ? '#ffc23a' : '#ffffff';
+      var e1x = sx(pl.x - ca * P.hw), e1y = sy(pl.y - sa * P.hw), e2x = sx(pl.x + ca * P.hw), e2y = sy(pl.y + sa * P.hw);
+      ctx.lineCap = 'round';
+      [[OL, 6 - G.p * 2.5], [col, 3.5 - G.p * 1.8]].forEach(function (st) { ctx.strokeStyle = st[0]; ctx.lineWidth = st[1]; ctx.beginPath(); ctx.moveTo(e1x, e1y); ctx.lineTo(gx, gy); ctx.lineTo(e2x, e2y); ctx.stroke(); });
+      var gr = 9 + G.p * 5 + G.tickPulse * 4;
+      ctx.fillStyle = col; ctx.strokeStyle = OL; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(gx, gy, gr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.beginPath(); ctx.arc(gx - gr * 0.3, gy - gr * 0.3, gr * 0.3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  /** 첫 판 시연용 점선 (실제 조준 아님) */
+  function drawGuideDemo(k) {
+    var g = groupOf(G.W), c = comOf(g); if (!c) return;
+    var C = nextCloud(), q = G.tutAimDemo, p = 0.8 * q, th = (C && C.x < G.W.anchor.x ? 100 : 80) * Math.PI / 180, v = launchSpeed(c.M, p, boostOf(g));
+    guideDots(ballistic(c.x, c.y + (-0.4 * q), v * Math.cos(th), v * Math.sin(th), Math.round(PHY.GUIDE_T1 / PHY.DT)), k, 0.6);
+  }
+  function drawTray(k) {
+    // 풀 언덕
+    var g2 = ctx.createLinearGradient(0, trayTop, 0, Hl);
+    g2.addColorStop(0, '#8fd36d'); g2.addColorStop(1, '#5aa84f');
+    ctx.fillStyle = g2; ctx.beginPath(); ctx.moveTo(-40, trayTop + 8);
+    for (var xx = -40; xx <= Wl + 40; xx += 20) ctx.quadraticCurveTo(xx + 10, trayTop - 4, xx + 20, trayTop + 8);
+    ctx.lineTo(Wl + 40, Hl + 40); ctx.lineTo(-40, Hl + 40); ctx.closePath(); ctx.fill();
+    var wig = G.trayWiggle > 0 ? Math.sin(G.t * 40) * 3 * G.trayWiggle * 2 : 0;
+    G.tray.forEach(function (t, i) {
+      var p = slotPos(i), sc = trayScale(t.kind), d = DIMS[t.kind], hh = (d.shape === 'ngon' ? d.r * Math.cos(Math.PI / d.n) : d.h / 2) * sc;
+      ctx.fillStyle = 'rgba(40,80,30,0.22)'; ctx.beginPath(); ctx.ellipse(p.x, p.y + 2, p.w * 0.32, 5, 0, 0, Math.PI * 2); ctx.fill();
+      if (t.status === 'ready' || t.status === 'dizzy') {
+        var bob = t.status === 'ready' ? Math.sin(G.t * 3 + t.bob) * 1.5 : 0;
+        ctx.save(); ctx.translate(p.x + wig, p.y - hh + bob); ctx.scale(1 + t.sq * 0.12, 1 - t.sq * 0.12);
+        drawFriend(t.kind, sc, { mood: t.status === 'dizzy' ? 9 : 0, grey: t.status === 'dizzy' });
+        ctx.restore();
+        var w8 = DIMS[t.kind].w8, nd = Math.ceil(w8);   // 무게 점 ●=1 ○=0.5
+        for (var d2 = 0; d2 < nd; d2++) { var dx2 = p.x + (d2 - (nd - 1) / 2) * 9; ctx.beginPath(); ctx.arc(dx2, p.y + 13, 3.2, 0, Math.PI * 2); if (d2 < Math.floor(w8)) { ctx.fillStyle = 'rgba(59,42,34,0.75)'; ctx.fill(); } else { ctx.strokeStyle = 'rgba(59,42,34,0.75)'; ctx.lineWidth = 1.5; ctx.stroke(); } }
+        if (t.status === 'dizzy') { var ty = p.y - hh * 2 - 10; ctx.fillStyle = '#fff'; ctx.strokeStyle = OL; ctx.lineWidth = 3; ctx.font = '13px Jua, sans-serif'; ctx.textAlign = 'center'; ctx.strokeText('어질', p.x + 16, ty); ctx.fillText('어질', p.x + 16, ty); }
+      } else if (t.status === 'return') {
+        var q = Math.min(1, t.k), e = 1 - (1 - q) * (1 - q), fx = t.from.x + (p.x - t.from.x) * e, fy = t.from.y + (p.y - hh - t.from.y) * e - Math.sin(Math.PI * q) * 50, ks = t.from.sc + (sc - t.from.sc) * e;
+        ctx.save(); ctx.translate(fx, fy); ctx.rotate((1 - q) * (t.dizzyBack ? 6 : 0)); drawFriend(t.kind, ks, { mood: t.dizzyBack ? 9 : 0, grey: t.dizzyBack && q > 0.5 }); ctx.restore();
+      } else if (t.status === 'spent') {
+        ctx.strokeStyle = 'rgba(40,80,30,0.35)'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(p.x, p.y - 18, 14, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      }
+    });
+  }
+  function drawDragPreview(k) {
+    var d = G.drag; if (!d || d.type !== 'friend') return;
+    var kind = d.t.kind, w = toWorld(dropX(d), d.y - 70), lifted = d.y0 - d.y > 30 || Math.abs(d.x - d.x0) > 30, ok = lifted && G.state === 'build' && canDrop(G.W, w.x);
+    if (ok) {
+      var y = landing(G.W, kind, w.x), v = POLY[kind], lo = 1e9; v.forEach(function (p) { lo = Math.min(lo, p.y); });
+      // 떨어질 자리: 반투명 친구 + 수직 점선 + 닿는 곳 그림자
+      ctx.save(); ctx.globalAlpha = 0.35; ctx.translate(sx(w.x), sy(y)); drawFriend(kind, k, {}); ctx.restore();
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 3; ctx.setLineDash([4, 6]);
+      ctx.beginPath(); ctx.moveTo(sx(w.x), d.y - 70 + (-lo) * k); ctx.lineTo(sx(w.x), sy(y + lo)); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(59,42,34,0.35)'; ctx.beginPath(); ctx.ellipse(sx(w.x), sy(y + lo), halfW(v) * k * 0.7, 4, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    var tilt = Math.max(-0.26, Math.min(0.26, -G.dragVx * 0.03));
+    ctx.save(); ctx.translate(d.x, d.y - 70); ctx.rotate(tilt); ctx.scale(1.08, 1.08); if (!ok) ctx.globalAlpha = 0.6; drawFriend(kind, k, { mood: ok ? 0 : 2, look: 'wide' }); ctx.restore();
+    if (!ok && lifted) { ctx.strokeStyle = 'rgba(230,60,40,0.8)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(d.x - 10, d.y - 80); ctx.lineTo(d.x + 10, d.y - 60); ctx.moveTo(d.x + 10, d.y - 80); ctx.lineTo(d.x - 10, d.y - 60); ctx.stroke(); }
+  }
+  /** 첫 판 손가락 시연 (글 없음): ① 꽝돌을 끌어 받침에 ② 받침 쪽을 아래·뒤로 당기기 */
+  function hand(x, y, press) {
+    ctx.save(); ctx.globalAlpha = 0.9;
+    ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.strokeStyle = OL; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(x, y, press ? 13 : 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    if (press) { ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, 24, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.restore();
+  }
+  function drawTutorial(k) {
+    G.tutAimDemo = 0;
+    if (G.state !== 'build' || G.drag || G.tut.step === 0) return;
+    if (G.tut.step === 1) {
+      var want = stackFriends(G.W).length ? 'puff' : 'kwang', i = -1;
+      G.tray.forEach(function (t, j) { if (i < 0 && t.status === 'ready' && t.kind === want) i = j; });
+      if (i < 0) G.tray.forEach(function (t, j) { if (i < 0 && t.status === 'ready') i = j; }); if (i < 0) return;
+      var a = slotPos(i), q = (G.t % 1.8) / 1.8, A = G.W.anchor, tx = sx(A.x), ty = sy(stackTop() + 1.0) + 70, demoKind = G.tray[i].kind;
+      var e = q < 0.15 ? 0 : q > 0.75 ? 1 : (q - 0.15) / 0.6, ee = e * e * (3 - 2 * e), hx = a.x + (tx - a.x) * ee, hy = a.y - 20 + (ty - a.y + 20) * ee;
+      if (q > 0.15 && q < 0.85) { ctx.save(); ctx.globalAlpha = 0.55; ctx.translate(hx, hy - 70); drawFriend(demoKind, k, {}); ctx.restore(); }
+      hand(hx, hy, q > 0.12 && q < 0.8);
+    } else if (G.tut.step === 2 && stackFriends(G.W).length && G.tut.idle > 1.2) {
+      var g = groupOf(G.W), c = comOf(g); if (!c) return;
+      var C = nextCloud(), dir = C && C.x < G.W.anchor.x ? -1 : 1;
+      var q2 = (G.t % 2) / 2, e2 = q2 < 0.2 ? 0 : q2 > 0.8 ? 1 : (q2 - 0.2) / 0.6, x0 = Math.max(40, Math.min(Wl - 40, sx(c.x) + dir * 110)), y0 = Math.max(90, sy(c.y) - 70);
+      G.tutAimDemo = e2 * (q2 < 0.9 ? 1 : 0);
+      hand(x0 - dir * 18 * e2, y0 + 95 * e2, q2 > 0.18 && q2 < 0.9);
+    }
+  }
+
+  /* ---------------- HUD·오버레이 ---------------- */
+  var flagsEl = document.getElementById('flags'), scoreEl = document.getElementById('score'), over = document.getElementById('over'), card = document.getElementById('card');
+  var FLAG = '<svg class="flag" viewBox="0 0 22 26" aria-hidden="true"><rect x="3" y="2" width="3" height="23" rx="1.5" fill="#6e4529"/><path d="M6 3 L20 7 L6 12 Z" fill="#57b8d9" stroke="#3b2a22" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+  function hud() {
+    var h = ''; for (var i = 0; i < LEVEL.flags; i++) h += FLAG.replace('class="flag"', 'class="flag' + (i >= G.flags ? ' used' : '') + '"');
+    if (flagsEl.innerHTML !== h) flagsEl.innerHTML = h;
+    scoreEl.textContent = G.score;
+  }
+  /** 별: 하늘집 도착 ★ · 깃발 2개 이상 남김 ★ · 친구 전원 데려옴 ★ */
+  function showWin() {
+    var brought = G.tray.length, all = brought >= G.total, bonus = G.flags * 300 + (all ? 1000 : 0); G.score += bonus; hud();
+    var n = 1 + (G.flags >= 2 ? 1 : 0) + (all ? 1 : 0), st = '';
+    for (var i = 0; i < 3; i++) st += '<span class="' + (i < n ? 'on' : 'off') + '">★</span>';
+    var prev = G.best, isBest = !prev || n > prev.stars || (n === prev.stars && G.score > prev.score);
+    if (isBest) saveBest({ stars: n, score: G.score });
+    var bestTxt = isBest ? '최고 기록!' : '최고 ' + '★'.repeat(prev.stars) + ' ' + prev.score;
+    card.innerHTML = '<div class="stars">' + st + '</div><div class="big">' + G.score + '</div><div class="sub">데려온 친구 ' + brought + '/' + G.total + ' · 남은 깃발 ' + G.flags + '<br>' + bestTxt + '</div><div class="row"><button class="pill main" data-a="restart" aria-label="다시">↻</button><button class="pill" data-a="back" aria-label="목업 고르기로">←</button></div>';
+    over.classList.add('show');
+    for (var q = 0; q < n; q++) (function (q) { setTimeout(function () { SND.star(q); buzz(25); }, 350 * q + 150); })(q);
+  }
+  function showLose() {
+    card.innerHTML = '<div class="stars"><span class="off">★</span><span class="off">★</span><span class="off">★</span></div><div class="big">' + G.score + '</div><div class="sub">구름 ' + G.W.stage + '/' + LEVEL.clouds.length + '까지 올라갔어요</div><div class="row"><button class="pill main" data-a="restart" aria-label="다시">↻ 다시</button><button class="pill" data-a="back" aria-label="목업 고르기로">←</button></div>';
+    over.classList.add('show');
+  }
+  function hideOver() { over.classList.remove('show'); card.innerHTML = ''; }
+  function goBack() { location.href = location.protocol === 'file:' ? 'index.html' : './'; }
+  over.addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; audio(); if (b.dataset.a === 'restart') { firstRun = false; newGame(); } else goBack(); });
+  document.getElementById('restart').addEventListener('click', function () { audio(); firstRun = false; ptr = null; newGame(); });
+  document.getElementById('back').addEventListener('click', goBack);
+
+  /* ---------------- 루프 ---------------- */
+  var last = performance.now();
+  function frame(now) {
+    requestAnimationFrame(frame);   // 오류가 나도 루프가 멈추지 않게 먼저 예약
+    var dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (G) { update(dt); render(); }
+  }
+  window.addEventListener('resize', resize);
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(stage);
+
+  /* ---------------- 읽기 전용 관찰 창 (자동 검증용) ---------------- */
+  function toClient(x, y) { var r = cv.getBoundingClientRect(); return { x: Math.round(r.left + x * s), y: Math.round(r.top + y * s) }; }
+  function r3(v) { return Math.round(v * 1000) / 1000; }
+  window.cloud = {
+    snapshot: function () {
+      var W = G.W, pl = W.plate.getPosition(), L = G.lastLaunch, C = nextCloud();
+      return JSON.parse(JSON.stringify({
+        state: G.state, stage: W.stage, flags: G.flags, score: G.score, aiming: G.aiming, p: r3(G.p), theta: r3(G.theta), step: W.step, tut: G.tut.step, welds: W.welds.length,
+        friends: W.friends.map(function (b) { var c = b.getPosition(), v = b.getLinearVelocity(), cl = toClient(sx(c.x), sy(c.y)); return { id: b.ud.id, kind: b.ud.kind, state: b.ud.state, x: r3(c.x), y: r3(c.y), a: r3(b.getAngle()), v: r3(Math.hypot(v.x, v.y)), vy: r3(v.y), puffed: !!b.ud.puffed, mood: moodOf(b), sx: cl.x, sy: cl.y }; }),
+        tray: G.tray.map(function (t, i) { var p = slotPos(i), cl = toClient(p.x, p.y - 24); return { id: t.id, kind: t.kind, status: t.status, sx: cl.x, sy: cl.y }; }),
+        left: G.left.map(function (f) { return f.kind; }), total: G.total,
+        plate: (function () { var cl = toClient(sx(pl.x), sy(pl.y)); return { x: r3(pl.x), y: r3(pl.y), a: r3(W.plate.getAngle()), sx: cl.x, sy: cl.y }; })(),
+        anchor: W.anchor, next: C ? { x: C.x, top: C.top, w: C.w, house: !!C.house } : null,
+        landT: r3(W.landT), result: G.result ? { stage: G.result.stage, n: G.result.stood.length, center: G.result.center } : null,
+        lastLaunch: L ? { p: r3(L.p), theta: r3(L.theta), M: r3(L.M), n: L.n, kinds: L.kinds, boost: L.boost, kwang: L.kwang, maxTilt: r3(L.maxTilt), guide: L.guide.slice(0, 30).map(function (q) { return [q.x, q.y]; }), track: L.track.slice(0, 30).map(function (q) { return [q.x, q.y]; }) } : null,
+        photo: !!G.photo, cam: { x: r3(cam.x), y: r3(cam.y), ppm: r3(cam.ppm) },
+        over: over.classList.contains('show'), won: G.won
+      }));
+    },
+    toClient: function (x, y) { return toClient(sx(x), sy(y)); },
+    /** (읽기 전용) 지금 탑을 theta° 로 쏴서 무게중심이 (tx, ty) 를 지나려면 당길 비율 p */
+    aimFor: function (theta, tx, ty) {
+      var g = groupOf(G.W), c = comOf(g); if (!c) return null;
+      var th = theta * Math.PI / 180, dx = tx - c.x, dy = ty - c.y, den = 2 * Math.pow(Math.cos(th), 2) * (dx * Math.tan(th) - dy);
+      if (den <= 0) return 1;
+      return Math.min(1, Math.sqrt(PHY.G * dx * dx / den) / launchSpeed(c.M, 1, boostOf(g)));
+    },
+    pullPx: PULL_FULL,
+    scale: function () { return s; }
+  };
+
+  resize();
+  newGame();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

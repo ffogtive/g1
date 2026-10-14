@@ -1,0 +1,15 @@
+{
+ "files": {
+  "sniff": "sniff.mp3",
+  "inhale": "inhale.mp3",
+  "chomp": "chomp.mp3",
+  "crunch": "crunch.mp3",
+  "grass": "grass.mp3",
+  "chew": "chew.mp3",
+  "sneeze": "sneeze.mp3",
+  "pop": "pop.mp3",
+  "peck": "peck.mp3",
+  "gulp": "gulp.mp3",
+  "stomp": "stomp.mp3"
+ }
+}
